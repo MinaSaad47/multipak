@@ -9,9 +9,11 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - Hide instances, or Multipak's own window, from screenshots, screen recordings and screen
-  sharing on KDE Plasma, using KWin window rules. Available in the instance dialog, in
-  Settings, and as `multipak capture on|off` and `multipak create --hide-from-capture`. The
-  repair tool detects missing or leftover rules.
+  sharing on KDE Plasma. Instances are matched per process (a KWin script plus an on-demand
+  D-Bus helper), so only the chosen instance is hidden even when every copy of the app shares
+  one window class. Available in the instance dialog, in Settings, and as
+  `multipak capture on|off` and `multipak create --hide-from-capture`. The repair tool detects
+  a missing, outdated or leftover helper.
 
 ## [0.1.0] - 2026-11-22
 

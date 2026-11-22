@@ -66,6 +66,7 @@ fn env_with(tmp: tempfile::TempDir, home: PathBuf) -> Env {
     fs::write(&icon, r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#4a154b"/></svg>"##).unwrap();
     let mut mgr = Manager::new(Arc::new(host.clone()), paths).unwrap();
     mgr.set_capture_support(multipak_core::capture::Support::KWin);
+    mgr.set_capture_helper(PathBuf::from("/usr/bin/multipak"));
     Env { _tmp: tmp, home, host, mgr }
 }
 
@@ -429,53 +430,72 @@ fn export_and_import_to_another_machine() {
 }
 
 #[test]
-fn hide_from_capture_writes_kwin_rule() {
+fn hide_from_capture_installs_per_process_helper() {
+    use multipak_core::capture;
     let env = setup();
     env.host.add_executable("gdbus", "/usr/bin/gdbus");
-    let rules = multipak_core::capture::rules_file(env.mgr.paths());
+    let paths = env.mgr.paths().clone();
+    let exe = std::path::PathBuf::from("/usr/bin/multipak");
+    let rules = capture::rules_file(&paths);
     fs::create_dir_all(rules.parent().unwrap()).unwrap();
+    // A class rule left by the first version is cleaned up.
     let user_rules = "[1]\nDescription=Mine\nwmclass=foo\n\n[General]\nOrder=1\n";
     fs::write(&rules, user_rules).unwrap();
+    capture::set_rule(&paths, "multipak-com.slack.Slack-old", "x", "x", true).unwrap();
 
     let mut d = slack("Work", &env);
     d.hide_from_capture = true;
     let inst = env.mgr.create(&d, false).unwrap().instance;
-    let text = fs::read_to_string(&rules).unwrap();
-    assert!(text.contains("[multipak-com.slack.Slack-work]"));
-    assert!(text.contains("excludefromcapture=true"));
-    assert!(text.contains("wmclass=multipak-slack-work"));
-    assert!(text.contains("Order=1,multipak-com.slack.Slack-work"));
-    assert_eq!(env.host.calls().iter().filter(|c| c.program.ends_with("gdbus")).count(), 1, "KWin reloaded");
-    assert!(env.mgr.doctor().unwrap().is_empty());
+    assert!(capture::helper_installed(&paths, &exe), "script, service file and plugin switch");
+    assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
+    assert!(env.mgr.doctor().unwrap().is_empty(), "{:?}", env.mgr.doctor().unwrap());
 
-    // The doctor notices a removed rule and the fix restores it.
-    multipak_core::capture::set_rule(env.mgr.paths(), "multipak-com.slack.Slack-work", "", "", false).unwrap();
+    // The helper answers per process, so two instances of the same app are told apart.
+    let other = env.mgr.create(&slack("Home", &env), false).unwrap().instance;
+    env.host.add_process(
+        500,
+        FakeProcess { environ: vec![format!("MULTIPAK_INSTANCE={}", inst.key())], ..Default::default() },
+    );
+    env.host.add_process(501, FakeProcess { parent: Some(500), ..Default::default() });
+    env.host.add_process(
+        600,
+        FakeProcess { environ: vec![format!("MULTIPAK_INSTANCE={}", other.key())], ..Default::default() },
+    );
+    env.host.add_process(700, FakeProcess { environ: vec!["FLATPAK_ID=com.slack.Slack".into()], ..Default::default() });
+    let config = env.mgr.load().unwrap();
+    assert_eq!(capture::decide(env.mgr.host(), &config, 501), capture::DECISION_HIDE);
+    assert_eq!(capture::decide(env.mgr.host(), &config, 600), capture::DECISION_SHOW);
+    assert_eq!(capture::decide(env.mgr.host(), &config, 700), capture::DECISION_NOT_OURS);
+
+    // The doctor notices a broken install, and a moved executable.
+    fs::remove_file(capture::service_file(&paths)).unwrap();
     let issues = env.mgr.doctor().unwrap();
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].kind, IssueKind::CaptureRuleMissing);
+    assert_eq!(issues[0].kind, IssueKind::CaptureHelperMissing);
     env.mgr.apply_fix(issues[0].fix.as_ref().unwrap()).unwrap();
     assert!(env.mgr.doctor().unwrap().is_empty());
 
-    // Turning it off removes the rule; deleting leaves the user's rules alone.
+    // Turning the last one off removes everything again.
     let mut off = inst.to_draft();
     off.hide_from_capture = false;
     env.mgr.update(&inst.key(), &off, false).unwrap();
-    assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
+    assert!(!capture::helper_present(&paths));
 
-    // Leftover rule groups are reported and removable.
-    multipak_core::capture::set_rule(env.mgr.paths(), "multipak-com.slack.Slack-gone", "x", "x", true).unwrap();
+    let mut on = inst.to_draft();
+    on.hide_from_capture = true;
+    env.mgr.update(&inst.key(), &on, false).unwrap();
+    assert!(capture::helper_installed(&paths, &exe));
+    env.mgr.delete(&inst.key(), false).unwrap();
+    assert!(!capture::helper_present(&paths));
+
+    // Leftover class rules from older versions are reported.
+    capture::set_rule(&paths, "multipak-com.slack.Slack-gone", "x", "x", true).unwrap();
     let issues = env.mgr.doctor().unwrap();
     assert_eq!(issues[0].kind, IssueKind::OrphanCaptureRule);
     env.mgr.apply_fix(issues[0].fix.as_ref().unwrap()).unwrap();
     assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
 
-    let mut on = inst.to_draft();
-    on.hide_from_capture = true;
-    env.mgr.update(&inst.key(), &on, false).unwrap();
-    env.mgr.delete(&inst.key(), false).unwrap();
-    assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
-
-    assert!(!env.mgr.self_hidden_from_capture());
+    // Multipak's own window still uses a class rule (its class is reliable).
     env.mgr.set_self_hidden_from_capture(true).unwrap();
     assert!(env.mgr.self_hidden_from_capture());
     env.mgr.set_self_hidden_from_capture(false).unwrap();

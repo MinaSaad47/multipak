@@ -135,6 +135,9 @@ pub trait Host: Send + Sync {
 
     /// Direct child processes of `pid`.
     fn proc_children(&self, pid: u32) -> Vec<u32>;
+
+    /// Parent process of `pid`, if known.
+    fn proc_parent(&self, pid: u32) -> Option<u32>;
 }
 
 /// The real implementation of [`Host`].
@@ -285,6 +288,10 @@ impl Host for SystemHost {
         fs::read(format!("/proc/{pid}/cmdline")).ok()
     }
 
+    fn proc_parent(&self, pid: u32) -> Option<u32> {
+        parse_stat_ppid(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+    }
+
     fn proc_children(&self, pid: u32) -> Vec<u32> {
         let mut out = Vec::new();
         let Ok(tasks) = fs::read_dir(format!("/proc/{pid}/task")) else {
@@ -312,6 +319,13 @@ pub fn which_in(program: &str, path_var: Option<OsString>) -> Option<PathBuf> {
     std::env::split_paths(&path_var).filter(|dir| dir.is_absolute()).map(|dir| dir.join(program)).find(|candidate| {
         fs::metadata(candidate).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
     })
+}
+
+/// Parent PID from `/proc/<pid>/stat`. The process name (field 2) may contain spaces and
+/// parentheses, so parsing starts after its last `)`.
+pub fn parse_stat_ppid(stat: &str) -> Option<u32> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_whitespace().nth(1)?.parse().ok()
 }
 
 /// Splits NUL separated `/proc` data into strings.
@@ -377,6 +391,13 @@ mod tests {
         assert_eq!(map["PATH"], Some(OsString::from("/usr/bin:/bin")));
         assert_eq!(map["LD_LIBRARY_PATH"], None);
         assert!(sanitized_env_changes(|_| None).is_empty());
+    }
+
+    #[test]
+    fn parses_parent_pid() {
+        assert_eq!(parse_stat_ppid("1234 (my (odd) name) S 42 1234 1234 0 -1"), Some(42));
+        assert_eq!(parse_stat_ppid("garbage"), None);
+        assert_eq!(SystemHost.proc_parent(std::process::id()), Some(std::os::unix::process::parent_id()));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! `multipak` with no arguments opens the GUI; subcommands give the same features on the
 //! command line (see `multipak --help`).
 
+mod capture_service;
 mod cli;
 mod gui;
 mod logging;
@@ -24,6 +25,15 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The executable D-Bus should start for the capture helper: the AppImage file itself when
+/// running from an AppImage (its mount point changes on every start), otherwise this binary.
+fn helper_executable() -> Option<std::path::PathBuf> {
+    std::env::var_os("APPIMAGE")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::current_exe().ok())
 }
 
 fn real_main(args: cli::Cli) -> anyhow::Result<ExitCode> {
@@ -48,9 +58,14 @@ fn real_main(args: cli::Cli) -> anyhow::Result<ExitCode> {
             AppTypeTable::builtin()
         }
     };
-    let manager = Arc::new(Manager::with_types(Arc::new(SystemHost), paths, types));
+    let mut manager = Manager::with_types(Arc::new(SystemHost), paths, types);
+    if let Some(exe) = helper_executable() {
+        manager.set_capture_helper(exe);
+    }
+    let manager = Arc::new(manager);
     match args.command {
         None | Some(cli::Command::Gui) => gui::run(manager, warnings).map(|()| ExitCode::SUCCESS),
+        Some(cli::Command::CaptureService) => capture_service::run(manager).map(|()| ExitCode::SUCCESS),
         Some(cmd) => cli::run(cmd, &manager),
     }
 }

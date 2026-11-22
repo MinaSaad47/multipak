@@ -26,6 +26,7 @@ pub struct FakeProcess {
     pub environ: Vec<String>,
     pub cmdline: Vec<String>,
     pub children: Vec<u32>,
+    pub parent: Option<u32>,
 }
 
 #[derive(Default)]
@@ -163,6 +164,10 @@ impl Host for FakeHost {
 
     fn proc_cmdline(&self, pid: u32) -> Option<Vec<u8>> {
         self.lock().processes.get(&pid).map(|p| join_nul(&p.cmdline))
+    }
+
+    fn proc_parent(&self, pid: u32) -> Option<u32> {
+        self.lock().processes.get(&pid).and_then(|p| p.parent)
     }
 
     fn proc_children(&self, pid: u32) -> Vec<u32> {

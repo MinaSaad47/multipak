@@ -141,6 +141,7 @@ pub struct Manager {
     types: AppTypeTable,
     launch_grace: Duration,
     capture_support: capture::Support,
+    capture_helper: Option<PathBuf>,
 }
 
 const SELF_RULE_DESCRIPTION: &str = "Multipak: hide Multipak from screen capture";
@@ -161,6 +162,7 @@ impl Manager {
             types,
             launch_grace: DEFAULT_LAUNCH_GRACE,
             capture_support: capture::detect(|k| std::env::var_os(k)),
+            capture_helper: None,
         }
     }
 
@@ -307,26 +309,7 @@ impl Manager {
             remove_if_exists(&autostart_path)?;
         }
         warnings.extend(self.refresh_desktop_database());
-        warnings.extend(self.apply_capture_rule(instance)?);
         Ok(warnings)
-    }
-
-    /// Description written into the KWin rule of an instance.
-    pub fn capture_rule_description(instance: &Instance) -> String {
-        format!("Multipak: hide {} from screen capture", instance.display_name())
-    }
-
-    /// Writes or removes the instance's "exclude from capture" window rule.
-    fn apply_capture_rule(&self, instance: &Instance) -> Result<Vec<String>> {
-        let group = capture::instance_group(&instance.app_id, &instance.slug);
-        let changed = capture::set_rule(
-            &self.paths,
-            &group,
-            &instance.wm_class,
-            &Self::capture_rule_description(instance),
-            instance.hide_from_capture,
-        )?;
-        Ok(self.after_rule_change(changed, instance.hide_from_capture))
     }
 
     /// Reloads KWin after a rule change and explains when the setting cannot take effect.
@@ -363,6 +346,48 @@ impl Manager {
         &self.capture_support
     }
 
+    /// The executable D-Bus starts for `multipak capture-service` (see [`capture`]).
+    pub fn set_capture_helper(&mut self, exe: PathBuf) {
+        self.capture_helper = Some(exe);
+    }
+
+    pub fn capture_helper(&self) -> Option<&Path> {
+        self.capture_helper.as_deref()
+    }
+
+    /// Installs or removes the per-process capture helper depending on whether any instance
+    /// hides from capture, and cleans up class-based rules left by older versions. Problems
+    /// are returned as warnings: they never block saving an instance.
+    pub fn sync_capture(&self) -> Result<Vec<String>> {
+        let config = self.load()?;
+        let wanted = config.instances.iter().any(|i| i.hide_from_capture);
+        let mut warnings = Vec::new();
+        let mut rules_changed = false;
+        for group in capture::instance_groups(&self.paths) {
+            rules_changed |= capture::set_rule(&self.paths, &group, "", "", false)?;
+        }
+        if !self.capture_support.is_supported() {
+            if wanted {
+                warnings.push(self.capture_support.description());
+            }
+            return Ok(warnings);
+        }
+        if rules_changed {
+            let _ = capture::reconfigure_kwin(self.host.as_ref());
+        }
+        match &self.capture_helper {
+            Some(exe) => {
+                if let Err(e) = capture::sync_helper(self.host.as_ref(), &self.paths, exe, wanted) {
+                    warnings.push(format!("Could not update the KWin script that hides windows from capture: {e}"));
+                }
+            }
+            None if wanted => warnings
+                .push("Could not find the Multipak executable, so windows cannot be hidden from capture.".into()),
+            None => {}
+        }
+        Ok(warnings)
+    }
+
     /// Overrides the detected desktop support (used by tests).
     pub fn set_capture_support(&mut self, support: capture::Support) {
         self.capture_support = support;
@@ -380,10 +405,6 @@ impl Manager {
             }
         }
         let _ = self.refresh_desktop_database();
-        let group = capture::instance_group(&instance.app_id, &instance.slug);
-        if capture::set_rule(&self.paths, &group, "", "", false)? {
-            let _ = self.after_rule_change(true, false);
-        }
         Ok(removed)
     }
 
@@ -432,6 +453,9 @@ impl Manager {
             return Err(e);
         }
         tracing::info!("created instance {}", instance.key());
+        if instance.hide_from_capture {
+            warnings.extend(self.sync_capture()?);
+        }
         Ok(SaveOutcome { instance, warnings })
     }
 
@@ -471,6 +495,9 @@ impl Manager {
         })?;
         if dir_changed && let Some(dir) = &old.managed_override {
             self.revoke_access(&old.app_id, dir)?;
+        }
+        if old.hide_from_capture != instance.hide_from_capture {
+            warnings.extend(self.sync_capture()?);
         }
         Ok(SaveOutcome { instance, warnings })
     }
@@ -530,6 +557,11 @@ impl Manager {
             Ok(())
         })?;
         tracing::info!("deleted instance {key} (data deleted: {})", report.data_deleted);
+        if instance.hide_from_capture {
+            for w in self.sync_capture()? {
+                tracing::warn!("{w}");
+            }
+        }
         Ok(report)
     }
 

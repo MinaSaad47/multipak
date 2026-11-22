@@ -112,6 +112,10 @@ impl MultipakApp {
         for w in startup_warnings {
             app.toasts.push(ToastKind::Warning, w);
         }
+        // Bring the capture helper in line with the setup (and clean up rules from older
+        // versions) without waiting for the next save.
+        let mgr = app.mgr.clone();
+        app.worker.spawn(move |_| Output::CaptureSynced(mgr.sync_capture()));
         app.refresh_all();
         app
     }
@@ -546,6 +550,14 @@ impl MultipakApp {
                     self.picked(purpose, path);
                 }
             }
+            Output::CaptureSynced(r) => match r {
+                Ok(warnings) => {
+                    for w in warnings {
+                        self.toasts.push(ToastKind::Warning, w);
+                    }
+                }
+                Err(e) => tracing::warn!("could not sync the capture helper: {e}"),
+            },
             Output::SelfCapture(r) => match r {
                 Ok((hidden, warnings)) => {
                     self.self_capture = Some(hidden);

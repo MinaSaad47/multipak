@@ -22,6 +22,7 @@ multipak/
 │   │   │   ├── doctor.rs     checks and one-click fixes
 │   │   │   ├── transfer.rs   JSON import/export
 │   │   │   ├── icons.rs      icon lookup and badge rendering
+│   │   │   ├── capture.rs    hiding windows from screen capture (KWin script + D-Bus helper)
 │   │   │   ├── fsutil.rs     disk usage, cache cleanup, guarded deletion
 │   │   │   ├── exec.rs       Host trait: commands and /proc, real implementation
 │   │   │   └── fake.rs       FakeHost for tests
@@ -30,6 +31,7 @@ multipak/
 │       └── src/
 │           ├── main.rs       argument parsing, logging, GUI or CLI
 │           ├── cli.rs        subcommands
+│           ├── capture_service.rs  D-Bus helper answering the KWin capture script
 │           └── gui/
 │               ├── model.rs  form state, validation, view models (tested without rendering)
 │               ├── worker.rs background job pool

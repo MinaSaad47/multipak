@@ -2,24 +2,36 @@
 //!
 //! Wayland has no standard protocol for this, so it depends on the compositor:
 //!
-//! - **KDE Plasma (KWin)** supports it through window rules: a rule with
-//!   `excludefromcapture=true` (the "Exclude from screen capture" property in System
-//!   Settings → Window Management → Window Rules). Multipak writes one rule group per
-//!   window class into `~/.config/kwinrulesrc`, named `multipak-…`, and asks KWin to reload
-//!   its configuration. Rules the user created are never touched.
+//! - **KDE Plasma (KWin)** lets a window be excluded from capture (the "Exclude from screen
+//!   capture" property).
 //! - Other desktops (GNOME, wlroots-based compositors, …) offer no such setting; the option
 //!   is saved but has no effect there.
 //!
-//! Matching is by window class (the Wayland app ID or X11 `WM_CLASS`), which is why each
-//! instance's window class matters.
+//! Instances are matched **per process**, not per window class, because many apps (most
+//! GTK apps, for example) ignore any class Multipak passes and every copy of the app would
+//! share one class. The pieces:
+//!
+//! 1. A KWin script (`~/.local/share/kwin/scripts/multipak-capture`) asks, for every window,
+//!    whether its process belongs to a hidden instance, and sets `excludeFromCapture`.
+//! 2. It asks over D-Bus. The answer comes from `multipak capture-service`, which D-Bus
+//!    starts on demand through `~/.local/share/dbus-1/services/<name>.service` and which
+//!    exits again when idle. It looks for `MULTIPAK_INSTANCE` in the environment of the
+//!    window's process (or its parents) and checks that instance's setting.
+//!
+//! Both are installed only while at least one instance hides from capture. Multipak's own
+//! window has a reliable class (`multipak`), so it uses a plain KWin window rule instead.
 
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::error::{IoContext, Result};
 use crate::exec::{CommandSpec, Host};
 use crate::keyfile::KeyFile;
 use crate::paths::Paths;
+
+use crate::config::Config;
+use crate::instance::{InstanceKey, MARKER_ENV};
 
 /// Rule group used for Multipak's own window.
 pub const SELF_GROUP: &str = "multipak-self";
@@ -46,7 +58,7 @@ impl Support {
     /// A one-line explanation for the UI.
     pub fn description(&self) -> String {
         match self {
-            Self::KWin => "Supported on KDE Plasma through a KWin window rule.".into(),
+            Self::KWin => "Supported on KDE Plasma (KWin).".into(),
             Self::Unsupported(desktop) => format!(
                 "Your desktop ({desktop}) cannot hide windows from capture; only KDE Plasma supports this. The setting is saved and works when you use Plasma."
             ),
@@ -71,7 +83,7 @@ pub fn rules_file(paths: &Paths) -> std::path::PathBuf {
     paths.xdg_config_home.join("kwinrulesrc")
 }
 
-/// Rule group name for one instance.
+/// Rule group name an instance used in older versions (class-based rules).
 pub fn instance_group(app_id: &str, slug: &str) -> String {
     format!("{GROUP_PREFIX}{app_id}-{slug}")
 }
@@ -148,37 +160,39 @@ pub fn set_rule(paths: &Paths, group: &str, wm_class: &str, description: &str, e
     Ok(true)
 }
 
-/// Multipak rule groups for instances (excluding Multipak's own window).
+/// Leftover class-based rule groups for instances from older versions.
 pub fn instance_groups(paths: &Paths) -> Vec<String> {
     let Ok(text) = std::fs::read_to_string(rules_file(paths)) else { return Vec::new() };
     KeyFile::parse(&text).groups().into_iter().filter(|g| g.starts_with(GROUP_PREFIX) && g != SELF_GROUP).collect()
 }
 
-/// Asks a running KWin to reload its rules. Tries `gdbus`, `qdbus6`, `qdbus`, then `busctl`.
-pub fn reconfigure_kwin(host: &dyn Host) -> Result<()> {
+/// Calls a session-bus method that takes only string arguments, using whichever D-Bus
+/// command-line tool is installed (`gdbus`, `qdbus6`, `qdbus`, then `busctl`).
+pub fn dbus_call(host: &dyn Host, dest: &str, path: &str, interface: &str, method: &str, args: &[&str]) -> Result<()> {
     let timeout = Duration::from_secs(10);
-    let attempts: [(&str, &[&str]); 4] = [
-        (
-            "gdbus",
-            &[
-                "call",
-                "--session",
-                "--dest",
-                "org.kde.KWin",
-                "--object-path",
-                "/KWin",
-                "--method",
-                "org.kde.KWin.reconfigure",
-            ],
-        ),
-        ("qdbus6", &["org.kde.KWin", "/KWin", "reconfigure"]),
-        ("qdbus", &["org.kde.KWin", "/KWin", "reconfigure"]),
-        ("busctl", &["--user", "call", "org.kde.KWin", "/KWin", "org.kde.KWin", "reconfigure"]),
-    ];
+    let full = format!("{interface}.{method}");
+    let mut attempts: Vec<(&str, Vec<String>)> = Vec::new();
+    let mut gdbus: Vec<String> =
+        ["call", "--session", "--dest", dest, "--object-path", path, "--method", &full].map(str::to_string).to_vec();
+    // gdbus parses arguments as GVariant text, so strings are single-quoted.
+    gdbus.extend(args.iter().map(|a| format!("'{}'", a.replace('\\', "\\\\").replace('\'', "\\'"))));
+    attempts.push(("gdbus", gdbus));
+    for tool in ["qdbus6", "qdbus"] {
+        let mut v: Vec<String> = vec![dest.into(), path.into(), full.clone()];
+        v.extend(args.iter().map(|a| a.to_string()));
+        attempts.push((tool, v));
+    }
+    let mut busctl: Vec<String> =
+        vec!["--user".into(), "call".into(), dest.into(), path.into(), interface.into(), method.into()];
+    if !args.is_empty() {
+        busctl.push("s".repeat(args.len()));
+        busctl.extend(args.iter().map(|a| a.to_string()));
+    }
+    attempts.push(("busctl", busctl));
     let mut last_err = None;
-    for (tool, args) in attempts {
+    for (tool, argv) in attempts {
         let Some(bin) = host.which(tool) else { continue };
-        let spec = CommandSpec::new(bin.display().to_string()).args(args.iter().copied()).timeout(timeout);
+        let spec = CommandSpec::new(bin.display().to_string()).args(argv).timeout(timeout);
         match host.run(&spec).and_then(|o| o.check(&spec)) {
             Ok(_) => return Ok(()),
             Err(e) => last_err = Some(e),
@@ -187,6 +201,229 @@ pub fn reconfigure_kwin(host: &dyn Host) -> Result<()> {
     Err(last_err.unwrap_or_else(|| {
         crate::Error::invalid("D-Bus", "no D-Bus command-line tool (gdbus, qdbus6, qdbus or busctl) was found")
     }))
+}
+
+/// Asks a running KWin to reload its configuration (window rules).
+pub fn reconfigure_kwin(host: &dyn Host) -> Result<()> {
+    dbus_call(host, "org.kde.KWin", "/KWin", "org.kde.KWin", "reconfigure", &[])
+}
+
+// ----- per-process helper ------------------------------------------------------------
+
+/// D-Bus name, object path and interface of `multipak capture-service`.
+pub const SERVICE_NAME: &str = "io.github.minasaad47.Multipak";
+pub const SERVICE_PATH: &str = "/io/github/minasaad47/Multipak";
+pub const SERVICE_INTERFACE: &str = "io.github.minasaad47.Multipak.Capture";
+/// Plugin ID of the KWin script.
+pub const SCRIPT_ID: &str = "multipak-capture";
+
+/// Answers of [`decide`], as sent over D-Bus.
+pub const DECISION_HIDE: i32 = 1;
+pub const DECISION_SHOW: i32 = 0;
+pub const DECISION_NOT_OURS: i32 = -1;
+
+/// The instance a process belongs to, from `MULTIPAK_INSTANCE` in its environment or in
+/// one of its parents (a window may be owned by a helper process of the app).
+pub fn instance_for_pid(host: &dyn Host, pid: u32) -> Option<InstanceKey> {
+    let prefix = format!("{MARKER_ENV}=");
+    let mut current = pid;
+    for _ in 0..8 {
+        if current <= 1 {
+            return None;
+        }
+        if let Some(env) = host.proc_environ(current)
+            && let Some(key) =
+                crate::exec::split_nul(&env).find_map(|v| v.strip_prefix(&prefix).and_then(InstanceKey::parse))
+        {
+            return Some(key);
+        }
+        current = host.proc_parent(current)?;
+    }
+    None
+}
+
+/// Whether the window of process `pid` should be hidden: [`DECISION_HIDE`],
+/// [`DECISION_SHOW`] (a Multipak instance that is not hidden) or [`DECISION_NOT_OURS`].
+pub fn decide(host: &dyn Host, config: &Config, pid: u32) -> i32 {
+    match instance_for_pid(host, pid).and_then(|k| config.get(&k).map(|i| i.hide_from_capture)) {
+        Some(true) => DECISION_HIDE,
+        Some(false) => DECISION_SHOW,
+        None => DECISION_NOT_OURS,
+    }
+}
+
+/// `~/.local/share/kwin/scripts/multipak-capture`
+pub fn script_dir(paths: &Paths) -> PathBuf {
+    paths.xdg_data_home.join("kwin/scripts").join(SCRIPT_ID)
+}
+
+/// `~/.local/share/dbus-1/services/io.github.minasaad47.Multipak.service`
+pub fn service_file(paths: &Paths) -> PathBuf {
+    paths.xdg_data_home.join("dbus-1/services").join(format!("{SERVICE_NAME}.service"))
+}
+
+pub fn script_metadata() -> String {
+    format!(
+        r#"{{
+    "KPlugin": {{
+        "Authors": [{{ "Name": "Multipak" }}],
+        "Description": "Hides windows of Multipak instances from screenshots, screen recordings and screen sharing",
+        "EnabledByDefault": false,
+        "Id": "{SCRIPT_ID}",
+        "License": "MIT",
+        "Name": "Multipak capture privacy",
+        "Version": "1"
+    }},
+    "KPackageStructure": "KWin/Script",
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}}
+"#
+    )
+}
+
+pub fn script_main() -> String {
+    format!(
+        r#"// Installed and managed by Multipak. Hides windows of Multipak instances that have
+// "Hide from screenshots, recordings and screen sharing" turned on.
+// The answer comes from `multipak capture-service` over D-Bus (started on demand).
+const SERVICE = "{SERVICE_NAME}";
+const PATH = "{SERVICE_PATH}";
+const IFACE = "{SERVICE_INTERFACE}";
+
+function check(window) {{
+    if (!window || !(window.pid > 0)) {{
+        return;
+    }}
+    callDBus(SERVICE, PATH, IFACE, "ShouldHide", String(window.pid), function (decision) {{
+        if (decision === {DECISION_HIDE}) {{
+            window.excludeFromCapture = true;
+        }} else if (decision === {DECISION_SHOW}) {{
+            window.excludeFromCapture = false;
+        }}
+    }});
+}}
+
+workspace.windowAdded.connect(check);
+workspace.windowList().forEach(check);
+"#
+    )
+}
+
+/// Contents of the D-Bus activation file for `helper` (the Multipak executable).
+pub fn service_contents(helper: &Path) -> String {
+    let quoted = helper.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+    format!("[D-BUS Service]\nName={SERVICE_NAME}\nExec=\"{quoted}\" capture-service\n")
+}
+
+fn write_if_changed(path: &Path, contents: &str, mode: u32) -> Result<bool> {
+    if std::fs::read_to_string(path).is_ok_and(|c| c == contents) {
+        return Ok(false);
+    }
+    crate::atomic::write_atomic(path, contents.as_bytes(), mode)?;
+    Ok(true)
+}
+
+/// Whether the script, its D-Bus service file and the KWin plugin switch are all in place
+/// and up to date for `helper`.
+pub fn helper_installed(paths: &Paths, helper: &Path) -> bool {
+    let dir = script_dir(paths);
+    let same = |p: PathBuf, want: String| std::fs::read_to_string(p).is_ok_and(|c| c == want);
+    same(dir.join("metadata.json"), script_metadata())
+        && same(dir.join("contents/code/main.js"), script_main())
+        && same(service_file(paths), service_contents(helper))
+        && plugin_enabled(paths)
+}
+
+/// Whether any part of the helper is present.
+pub fn helper_present(paths: &Paths) -> bool {
+    script_dir(paths).exists() || service_file(paths).exists() || plugin_enabled(paths)
+}
+
+fn kwinrc(paths: &Paths) -> PathBuf {
+    paths.xdg_config_home.join("kwinrc")
+}
+
+/// Whether the KWin script is switched on in `kwinrc`.
+pub fn plugin_enabled(paths: &Paths) -> bool {
+    std::fs::read_to_string(kwinrc(paths))
+        .is_ok_and(|t| KeyFile::parse(&t).get_bool("Plugins", &format!("{SCRIPT_ID}Enabled")) == Some(true))
+}
+
+/// Switches the KWin script on or off in `kwinrc` (with `kwriteconfig6` when available,
+/// so KConfig writes its own file).
+fn set_plugin_enabled(host: &dyn Host, paths: &Paths, enabled: bool) -> Result<()> {
+    let key = format!("{SCRIPT_ID}Enabled");
+    let file = kwinrc(paths);
+    if let Some(tool) = host.which("kwriteconfig6") {
+        let mut spec = CommandSpec::new(tool.display().to_string()).args([
+            "--file".to_string(),
+            file.display().to_string(),
+            "--group".into(),
+            "Plugins".into(),
+            "--key".into(),
+            key,
+        ]);
+        spec = if enabled { spec.args(["--type", "bool", "true"]) } else { spec.args(["--delete"]) };
+        let spec = spec.timeout(Duration::from_secs(10));
+        host.run(&spec)?.check(&spec)?;
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let mut kf = KeyFile::parse(&text);
+    if enabled {
+        kf.set("Plugins", &key, "true");
+    } else if !kf.remove("Plugins", &key) {
+        return Ok(());
+    }
+    crate::atomic::write_atomic(&file, kf.to_text().as_bytes(), 0o600)
+}
+
+/// (Re)loads the KWin script so every open window is checked again.
+fn reload_script(host: &dyn Host) -> Result<()> {
+    // Unloading fails harmlessly when the script is not loaded yet.
+    let _ = dbus_call(host, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "unloadScript", &[SCRIPT_ID]);
+    dbus_call(host, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "start", &[])
+}
+
+/// Installs (`wanted = true`) or removes the per-process helper, and reloads KWin so the
+/// change applies to open windows immediately. `helper` is the Multipak executable.
+pub fn sync_helper(host: &dyn Host, paths: &Paths, helper: &Path, wanted: bool) -> Result<()> {
+    if wanted {
+        let dir = script_dir(paths);
+        write_if_changed(&dir.join("metadata.json"), &script_metadata(), 0o644)?;
+        write_if_changed(&dir.join("contents/code/main.js"), &script_main(), 0o644)?;
+        if write_if_changed(&service_file(paths), &service_contents(helper), 0o644)? {
+            // dbus-broker only notices new activation files after a reload.
+            let _ = dbus_call(
+                host,
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "ReloadConfig",
+                &[],
+            );
+        }
+        if !plugin_enabled(paths) {
+            set_plugin_enabled(host, paths, true)?;
+        }
+        reload_script(host)
+    } else {
+        if !helper_present(paths) {
+            return Ok(());
+        }
+        let _ = dbus_call(host, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "unloadScript", &[SCRIPT_ID]);
+        set_plugin_enabled(host, paths, false)?;
+        let dir = script_dir(paths);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).ctx(|| format!("could not remove {}", dir.display()))?;
+        }
+        match std::fs::remove_file(service_file(paths)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e).ctx(|| format!("could not remove {}", service_file(paths).display())),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -241,6 +478,74 @@ mod tests {
         assert!(set_rule(&paths, SELF_GROUP, SELF_WM_CLASS, "Multipak", true).unwrap());
         assert!(has_rule(&paths, SELF_GROUP, SELF_WM_CLASS, "Multipak"));
         assert!(instance_groups(&paths).is_empty());
+    }
+
+    #[test]
+    fn finds_instance_through_parent_processes() {
+        use crate::fake::FakeProcess;
+        let host = FakeHost::new();
+        host.add_process(
+            30,
+            FakeProcess {
+                environ: vec!["MULTIPAK_INSTANCE=com.x.Y/work".into()],
+                parent: Some(20),
+                ..Default::default()
+            },
+        );
+        host.add_process(
+            31,
+            FakeProcess { environ: vec!["PATH=/app/bin".into()], parent: Some(30), ..Default::default() },
+        );
+        host.add_process(32, FakeProcess { parent: Some(31), ..Default::default() }); // environ unreadable
+        host.add_process(
+            40,
+            FakeProcess { environ: vec!["FLATPAK_ID=com.x.Y".into()], parent: Some(1), ..Default::default() },
+        );
+        let key = InstanceKey::new("com.x.Y", "work");
+        assert_eq!(instance_for_pid(&host, 32), Some(key.clone()));
+        assert_eq!(instance_for_pid(&host, 40), None);
+        assert_eq!(instance_for_pid(&host, 999), None);
+
+        let paths = Paths::for_home("/home/u");
+        let mut inst = crate::instance::InstanceDraft::new("com.x.Y", "Y", "work", crate::Strategy::Generic, &[])
+            .validate(crate::instance::DraftContext { paths: &paths, existing: &[], editing: None })
+            .unwrap()
+            .instance;
+        let mut config = Config { instances: vec![inst.clone()], ..Default::default() };
+        assert_eq!(decide(&host, &config, 32), DECISION_SHOW);
+        inst.hide_from_capture = true;
+        config.instances = vec![inst];
+        assert_eq!(decide(&host, &config, 32), DECISION_HIDE);
+        assert_eq!(decide(&host, &config, 40), DECISION_NOT_OURS);
+    }
+
+    #[test]
+    fn installs_and_removes_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::for_home(dir.path());
+        let host = FakeHost::new();
+        host.add_executable("gdbus", "/usr/bin/gdbus");
+        let exe = Path::new("/opt/My Apps/multipak");
+        assert!(!helper_present(&paths));
+        sync_helper(&host, &paths, exe, true).unwrap();
+        assert!(helper_installed(&paths, exe));
+        let service = std::fs::read_to_string(service_file(&paths)).unwrap();
+        assert!(service.contains(r#"Exec="/opt/My Apps/multipak" capture-service"#));
+        assert!(
+            std::fs::read_to_string(script_dir(&paths).join("contents/code/main.js"))
+                .unwrap()
+                .contains("excludeFromCapture")
+        );
+        let kwinrc = std::fs::read_to_string(paths.xdg_config_home.join("kwinrc")).unwrap();
+        assert!(kwinrc.contains("[Plugins]\nmultipak-captureEnabled=true"));
+        let methods: Vec<String> = host.calls().iter().filter_map(|c| c.args.get(7).cloned()).collect();
+        assert!(methods.contains(&"org.freedesktop.DBus.ReloadConfig".to_string()));
+        assert!(methods.contains(&"org.kde.kwin.Scripting.start".to_string()));
+        assert!(!helper_installed(&paths, Path::new("/elsewhere/multipak")), "a moved executable is detected");
+
+        sync_helper(&host, &paths, exe, false).unwrap();
+        assert!(!helper_present(&paths));
+        assert!(!std::fs::read_to_string(paths.xdg_config_home.join("kwinrc")).unwrap().contains("multipak-capture"));
     }
 
     #[test]

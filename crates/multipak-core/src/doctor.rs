@@ -24,7 +24,8 @@ pub enum IssueKind {
     AutostartStale,
     BadgeIconMissing,
     OverrideMissing,
-    CaptureRuleMissing,
+    CaptureHelperMissing,
+    CaptureHelperLeftover,
     OrphanFile,
     OrphanCaptureRule,
 }
@@ -42,6 +43,8 @@ pub enum Fix {
     RemoveFile(PathBuf),
     /// Add the instance's filesystem override again.
     ReapplyOverride(InstanceKey),
+    /// Install, update or remove the KWin script that hides windows from capture.
+    SyncCapture,
     /// Remove a leftover Multipak window rule from `kwinrulesrc`.
     RemoveCaptureRule(String),
 }
@@ -55,6 +58,7 @@ impl Fix {
             Self::RemoveFile(_) => "Delete file",
             Self::ReapplyOverride(_) => "Restore folder access",
             Self::RemoveCaptureRule(_) => "Remove window rule",
+            Self::SyncCapture => "Update capture helper",
         }
     }
 }
@@ -182,20 +186,6 @@ impl Manager {
                     Some(Fix::WriteLaunchers(key.clone())),
                 ));
             }
-            if inst.hide_from_capture
-                && !crate::capture::has_rule(
-                    paths,
-                    &crate::capture::instance_group(&inst.app_id, &inst.slug),
-                    &inst.wm_class,
-                    &Manager::capture_rule_description(inst),
-                )
-            {
-                issues.push(issue(
-                    IssueKind::CaptureRuleMissing,
-                    "The window rule that hides this instance from screen capture is missing or out of date.".into(),
-                    Some(Fix::WriteLaunchers(key.clone())),
-                ));
-            }
             if let Some(dir) = &inst.managed_override
                 && !flatpak::override_has_filesystem(paths, &inst.app_id, dir)
             {
@@ -206,8 +196,34 @@ impl Manager {
                 ));
             }
         }
+        issues.extend(self.capture_issues(&config));
         issues.extend(self.orphans(&config)?);
         Ok(issues)
+    }
+
+    fn capture_issues(&self, config: &crate::config::Config) -> Vec<Issue> {
+        let paths = self.paths();
+        let wanted = config.instances.iter().any(|i| i.hide_from_capture);
+        let mut issues = Vec::new();
+        if !self.capture_support().is_supported() {
+            return issues;
+        }
+        match (wanted, self.capture_helper()) {
+            (true, Some(exe)) if !crate::capture::helper_installed(paths, exe) => issues.push(Issue {
+                key: None,
+                kind: IssueKind::CaptureHelperMissing,
+                message: "The KWin script that hides instances from screen capture is missing, disabled or points to an old Multipak location.".into(),
+                fix: Some(Fix::SyncCapture),
+            }),
+            (false, _) if crate::capture::helper_present(paths) => issues.push(Issue {
+                key: None,
+                kind: IssueKind::CaptureHelperLeftover,
+                message: "The KWin capture script is installed although no instance hides from capture.".into(),
+                fix: Some(Fix::SyncCapture),
+            }),
+            _ => {}
+        }
+        issues
     }
 
     fn orphans(&self, config: &crate::config::Config) -> Result<Vec<Issue>> {
@@ -306,6 +322,12 @@ impl Manager {
                 }
                 fs::remove_file(path)
                     .map_err(|e| Error::Io { context: format!("could not remove {}", path.display()), source: e })
+            }
+            Fix::SyncCapture => {
+                for w in self.sync_capture()? {
+                    tracing::warn!("{w}");
+                }
+                Ok(())
             }
             Fix::RemoveCaptureRule(group) => {
                 if crate::capture::set_rule(self.paths(), group, "", "", false)?

@@ -104,6 +104,9 @@ pub enum Command {
         #[arg(long = "self")]
         self_window: bool,
     },
+    /// D-Bus helper used by the KWin capture script (started automatically by D-Bus).
+    #[command(hide = true)]
+    CaptureService,
     /// Check launchers, folders and installed apps.
     Doctor {
         /// Apply the available fixes (instances of uninstalled apps are only removed with --remove-missing).
@@ -179,7 +182,7 @@ pub struct CreateArgs {
 /// Runs one CLI command.
 pub fn run(command: Command, mgr: &Manager) -> anyhow::Result<ExitCode> {
     match command {
-        Command::Gui => unreachable!("handled by main"),
+        Command::Gui | Command::CaptureService => unreachable!("handled by main"),
         Command::List { app, json } => list(mgr, app.as_deref(), json),
         Command::Apps { detect, json } => apps(mgr, detect, json),
         Command::Create(args) => create(mgr, args),

@@ -64,10 +64,20 @@ Each instance gets a launcher in `~/.local/share/applications/` with its own nam
 your app menu and dock as its own app.
 
 Instances (and Multipak itself) can also be **hidden from screenshots, screen recordings
-and screen sharing**. On KDE Plasma this is done with a KWin window rule ("Exclude from screen
-capture") matched on the instance's window class; Multipak adds and removes only its own rules
-in `~/.config/kwinrulesrc` and asks KWin to reload them. Other desktops have no equivalent
-feature, so there the option is saved but has no effect.
+and screen sharing** on KDE Plasma. Each instance is matched by its process, not its window
+class, because many apps ignore the class Multipak passes, so only the instances you choose
+are hidden, even among copies of the same app:
+
+- a small KWin script (`~/.local/share/kwin/scripts/multipak-capture`, visible under System
+  Settings → Window Management → KWin Scripts) asks, for each new window, whether it belongs to
+  a hidden instance, and excludes it from capture;
+- the answer comes from `multipak capture-service`, which D-Bus starts on demand (through
+  `~/.local/share/dbus-1/services/io.github.minasaad47.Multipak.service`) and which exits when
+  idle; it reads the `MULTIPAK_INSTANCE` marker of the window's process.
+
+Both are installed only while at least one instance hides from capture, and removed
+afterwards. Multipak's own window uses a plain KWin window rule. Other desktops have no
+equivalent feature, so there the option is saved but has no effect.
 
 If you choose a data folder **outside** `~/.var/app/<app-id>/`, Multipak shows you the exact
 `flatpak override --user --filesystem=<dir> <app-id>` command, asks first, and removes exactly
@@ -250,7 +260,8 @@ to add an app to the built-in table.
 | `~/.local/share/applications/multipak-<app-id>-<short-name>.desktop` | Launcher |
 | `~/.config/autostart/multipak-<app-id>-<short-name>.desktop` | Autostart entry (if enabled) |
 | `~/.local/share/icons/multipak/<app-id>-<short-name>.png` | Badge icon (if enabled) |
-| `~/.config/kwinrulesrc` | Only on KDE Plasma, for instances hidden from screen capture: rule groups named `multipak-…` |
+| `~/.local/share/kwin/scripts/multipak-capture/`, `~/.local/share/dbus-1/services/io.github.minasaad47.Multipak.service` | Only on KDE Plasma, while an instance hides from screen capture (enabled in `~/.config/kwinrc`) |
+| `~/.config/kwinrulesrc` | Only if Multipak's own window hides from capture: the `multipak-self` rule |
 | `~/.local/state/multipak/` | Launch output of each instance, and the log file (if enabled) |
 | `~/.local/share/flatpak/overrides/<app-id>` | Only for custom data folders, after you allowed it |
 
@@ -304,9 +315,10 @@ as `instances.toml.v<N>.bak`). Files from newer versions are refused rather than
   `-CreateProfile` becomes its default profile. Start the app normally once before creating
   instances if you want to keep a separate default profile. Deleting an instance leaves its
   entry in the app's `profiles.ini` (the browser ignores entries whose folder is gone).
-- **Hiding from screen capture** needs KDE Plasma 6 (KWin window rules). GNOME, Sway and other
-  compositors offer no way for an app to opt out of capture. The rule matches the window class,
-  so an app that ignores its `--class`/`--name` on native Wayland (see above) is not hidden.
+- **Hiding from screen capture** needs KDE Plasma 6. GNOME, Sway and other compositors offer no
+  way to exclude a window from capture. Windows are hidden a moment after they open (once the
+  helper has answered), so a capture that is already running may record the first frame.
+  If you move the Multipak AppImage, run **Repair** so the helper points to the new location.
 - **Running detection** reads `/proc` of the sandbox processes. On systems mounted with
   `hidepid`, instances may show as "Not running" even when they are.
 - **Folder access** is granted with per-user overrides (`flatpak override --user`) only.

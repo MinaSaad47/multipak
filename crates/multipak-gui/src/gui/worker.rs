@@ -51,6 +51,7 @@ pub enum Output {
     Picked(PickPurpose, Option<PathBuf>),
     Opened(Result<(), String>),
     SelfCapture(Result<(bool, Vec<String>), Error>),
+    CaptureSynced(Result<Vec<String>, Error>),
 }
 
 pub enum Msg {
