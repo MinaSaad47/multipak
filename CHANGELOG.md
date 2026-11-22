@@ -1,0 +1,35 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-11-22
+
+First release.
+
+### Added
+
+- Create, edit, duplicate, launch, stop and delete isolated instances of Flatpak apps, each
+  with its own data folder, launcher, window class and optional badge icon.
+- Launch strategies for Electron apps, Chromium-based browsers, Firefox-based browsers and a
+  generic XDG-folder strategy, with automatic detection from a built-in app table, the app's
+  Flatpak base app and its files. The table can be extended in `~/.config/multipak/app_types.toml`.
+- Warnings for apps that probably allow only one running copy.
+- Custom data folders with an explicit, reversible `flatpak override --user --filesystem`.
+- Autostart entries, running status from `flatpak ps`, disk usage, clearing caches, and
+  opening the data folder.
+- Backup and restore of single instances as `.tar.zst`, with progress and cancellation.
+- Repair ("doctor") for missing or outdated launchers, missing data folders, lost folder
+  access, uninstalled apps and leftover files, with one-click fixes.
+- Import and export of the setup as JSON, optionally with data backups.
+- egui GUI (glow renderer, Wayland and X11) with system/light/dark themes, keyboard shortcuts
+  and AccessKit support.
+- CLI: `list`, `apps`, `create`, `launch`, `stop`, `delete`, `backup`, `restore`, `doctor`,
+  `export`, `import`.
+- AppImage, release tarball and AUR PKGBUILD.
+
+[Unreleased]: https://github.com/MinaSaad47/multipak/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/MinaSaad47/multipak/releases/tag/v0.1.0

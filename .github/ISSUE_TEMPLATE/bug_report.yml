@@ -1,0 +1,51 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check that the problem also happens with the latest release.
+        Running `multipak doctor` and `multipak --verbose <command>` often shows the cause.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Flatpak app ID
+      description: The app the instance is for, e.g. com.slack.Slack (if relevant)
+  - type: dropdown
+    id: strategy
+    attributes:
+      label: Launch type
+      options: [Electron, Chromium-based, Firefox-based, Generic, Not relevant]
+  - type: input
+    id: version
+    attributes:
+      label: Multipak version
+      description: Output of `multipak --version`
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop
+      description: e.g. Fedora 43, GNOME 49, Wayland
+    validations:
+      required: true
+  - type: input
+    id: install
+    attributes:
+      label: How did you install Multipak?
+      description: AppImage, AUR, built from source, …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output of the failing command with `--verbose`, or ~/.local/state/multipak/multipak.log. Remove anything private.
+      render: text

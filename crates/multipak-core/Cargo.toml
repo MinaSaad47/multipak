@@ -1,0 +1,28 @@
+[package]
+name = "multipak-core"
+description = "Core library for Multipak: manage multiple isolated instances of Flatpak apps"
+readme = "../../README.md"
+keywords = ["flatpak", "linux", "desktop", "instances", "profiles"]
+categories = ["command-line-utilities", "os::linux-apis"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+image.workspace = true
+resvg.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+time.workspace = true
+toml.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

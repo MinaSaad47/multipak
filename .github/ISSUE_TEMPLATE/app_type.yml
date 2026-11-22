@@ -1,0 +1,32 @@
+name: Add or fix an app in the app-type table
+description: An app is detected with the wrong launch type, or is missing from the table
+labels: [app-table]
+body:
+  - type: input
+    id: app
+    attributes:
+      label: Flatpak app ID
+      description: e.g. com.example.App
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Launch type that works
+      options: [electron, chromium, firefox, generic]
+    validations:
+      required: true
+  - type: dropdown
+    id: single
+    attributes:
+      label: Does the app allow only one running copy?
+      options: ["No, two instances run side by side", "Yes, a second launch opens a window in the first", "Not sure"]
+    validations:
+      required: true
+  - type: textarea
+    id: tested
+    attributes:
+      label: How did you test it?
+      description: Which instances did you create, and did they keep separate accounts/settings?
+    validations:
+      required: true

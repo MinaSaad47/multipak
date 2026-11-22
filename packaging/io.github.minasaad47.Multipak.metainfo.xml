@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.minasaad47.Multipak</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>Multipak</name>
+  <summary>Run several isolated instances of the same Flatpak app</summary>
+  <description>
+    <p>
+      Multipak creates separate instances of installed Flatpak apps, each with its own data
+      folder, launcher and window class: for example "Work" and "Personal" Slack, several
+      Discord accounts, or one browser profile per client.
+    </p>
+    <p>Multipak makes no network connections and collects no data.</p>
+  </description>
+  <launchable type="desktop-id">multipak.desktop</launchable>
+  <url type="homepage">https://github.com/MinaSaad47/multipak</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-22"/>
+  </releases>
+</component>

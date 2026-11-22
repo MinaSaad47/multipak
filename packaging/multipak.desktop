@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Multipak
+GenericName=Flatpak Instance Manager
+Comment=Run several isolated instances of the same Flatpak app
+Exec=multipak
+Icon=multipak
+Terminal=false
+StartupNotify=true
+StartupWMClass=multipak
+Categories=Utility;
+Keywords=flatpak;instance;profile;account;sandbox;multiple;

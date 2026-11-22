@@ -1,0 +1,36 @@
+[package]
+name = "multipak"
+description = "Create and run multiple isolated instances of Flatpak apps, each with its own data folder"
+readme = "../../README.md"
+keywords = ["flatpak", "linux", "desktop", "egui", "profiles"]
+categories = ["gui", "command-line-utilities"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "multipak"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui_extras.workspace = true
+image.workspace = true
+multipak-core.workspace = true
+open.workspace = true
+rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

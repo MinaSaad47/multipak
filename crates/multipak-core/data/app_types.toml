@@ -1,0 +1,176 @@
+# Built-in table of known Flatpak apps and how Multipak should launch them.
+#
+# Each entry:
+#   id              Flatpak application ID (exact match)
+#   kind            electron | chromium | firefox | generic
+#   single_instance true if the app only allows one running copy (optional)
+#   note            short remark shown in the UI (optional)
+#
+# Users can add or override entries in ~/.config/multipak/app_types.toml using
+# the same format. See CONTRIBUTING.md before adding entries here.
+
+# --- Electron apps -----------------------------------------------------------
+[[app]]
+id = "com.slack.Slack"
+kind = "electron"
+
+[[app]]
+id = "com.discordapp.Discord"
+kind = "electron"
+
+[[app]]
+id = "com.discordapp.DiscordCanary"
+kind = "electron"
+
+[[app]]
+id = "dev.vencord.Vesktop"
+kind = "electron"
+
+[[app]]
+id = "com.github.IsmaelMartinez.teams_for_linux"
+kind = "electron"
+
+[[app]]
+id = "md.obsidian.Obsidian"
+kind = "electron"
+
+[[app]]
+id = "org.signal.Signal"
+kind = "electron"
+
+[[app]]
+id = "im.riot.Riot"
+kind = "electron"
+note = "Element Desktop"
+
+[[app]]
+id = "com.visualstudio.code"
+kind = "electron"
+
+[[app]]
+id = "com.vscodium.codium"
+kind = "electron"
+
+[[app]]
+id = "com.bitwarden.desktop"
+kind = "electron"
+
+[[app]]
+id = "com.getpostman.Postman"
+kind = "electron"
+
+[[app]]
+id = "com.usebruno.Bruno"
+kind = "electron"
+
+[[app]]
+id = "com.mongodb.Compass"
+kind = "electron"
+
+[[app]]
+id = "com.mattermost.Desktop"
+kind = "electron"
+
+[[app]]
+id = "chat.rocket.RocketChat"
+kind = "electron"
+
+[[app]]
+id = "org.ferdium.Ferdium"
+kind = "electron"
+
+[[app]]
+id = "com.github.th_ch.youtube_music"
+kind = "electron"
+
+[[app]]
+id = "io.github.spacingbat3.webcord"
+kind = "electron"
+
+[[app]]
+id = "com.logseq.Logseq"
+kind = "electron"
+
+[[app]]
+id = "net.cozic.joplin_desktop"
+kind = "electron"
+
+[[app]]
+id = "com.heroicgameslauncher.hgl"
+kind = "electron"
+
+# --- Chromium-based browsers -------------------------------------------------
+[[app]]
+id = "com.google.Chrome"
+kind = "chromium"
+
+[[app]]
+id = "com.google.ChromeDev"
+kind = "chromium"
+
+[[app]]
+id = "org.chromium.Chromium"
+kind = "chromium"
+
+[[app]]
+id = "io.github.ungoogled_software.ungoogled_chromium"
+kind = "chromium"
+
+[[app]]
+id = "com.brave.Browser"
+kind = "chromium"
+
+[[app]]
+id = "com.microsoft.Edge"
+kind = "chromium"
+
+[[app]]
+id = "com.vivaldi.Vivaldi"
+kind = "chromium"
+
+[[app]]
+id = "com.opera.Opera"
+kind = "chromium"
+
+# --- Firefox-based browsers and mail clients -------------------------------
+[[app]]
+id = "org.mozilla.firefox"
+kind = "firefox"
+
+[[app]]
+id = "io.gitlab.librewolf-community"
+kind = "firefox"
+
+[[app]]
+id = "one.ablaze.floorp"
+kind = "firefox"
+
+[[app]]
+id = "app.zen_browser.zen"
+kind = "firefox"
+
+[[app]]
+id = "net.waterfox.waterfox"
+kind = "firefox"
+
+[[app]]
+id = "net.mullvad.MullvadBrowser"
+kind = "firefox"
+
+[[app]]
+id = "org.mozilla.Thunderbird"
+kind = "firefox"
+
+[[app]]
+id = "org.mozilla.thunderbird_esr"
+kind = "firefox"
+
+[[app]]
+id = "eu.betterbird.Betterbird"
+kind = "firefox"
+
+# --- Others ------------------------------------------------------------------
+[[app]]
+id = "org.telegram.desktop"
+kind = "generic"
+note = "Telegram keeps its data in XDG_DATA_HOME, so the generic strategy works."
