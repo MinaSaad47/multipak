@@ -64,7 +64,8 @@ fn env_with(tmp: tempfile::TempDir, home: PathBuf) -> Env {
     let icon = share.join("icons/hicolor/scalable/apps/com.slack.Slack.svg");
     fs::create_dir_all(icon.parent().unwrap()).unwrap();
     fs::write(&icon, r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#4a154b"/></svg>"##).unwrap();
-    let mgr = Manager::new(Arc::new(host.clone()), paths).unwrap();
+    let mut mgr = Manager::new(Arc::new(host.clone()), paths).unwrap();
+    mgr.set_capture_support(multipak_core::capture::Support::KWin);
     Env { _tmp: tmp, home, host, mgr }
 }
 
@@ -425,6 +426,70 @@ fn export_and_import_to_another_machine() {
     let client = env2.mgr.load().unwrap().find("com.slack.Slack/client").unwrap().clone();
     assert_eq!(client.data_dir.as_deref(), Some(home2.join("Clients/one").as_path()));
     assert!(client.managed_override.is_some());
+}
+
+#[test]
+fn hide_from_capture_writes_kwin_rule() {
+    let env = setup();
+    env.host.add_executable("gdbus", "/usr/bin/gdbus");
+    let rules = multipak_core::capture::rules_file(env.mgr.paths());
+    fs::create_dir_all(rules.parent().unwrap()).unwrap();
+    let user_rules = "[1]\nDescription=Mine\nwmclass=foo\n\n[General]\nOrder=1\n";
+    fs::write(&rules, user_rules).unwrap();
+
+    let mut d = slack("Work", &env);
+    d.hide_from_capture = true;
+    let inst = env.mgr.create(&d, false).unwrap().instance;
+    let text = fs::read_to_string(&rules).unwrap();
+    assert!(text.contains("[multipak-com.slack.Slack-work]"));
+    assert!(text.contains("excludefromcapture=true"));
+    assert!(text.contains("wmclass=multipak-slack-work"));
+    assert!(text.contains("Order=1,multipak-com.slack.Slack-work"));
+    assert_eq!(env.host.calls().iter().filter(|c| c.program.ends_with("gdbus")).count(), 1, "KWin reloaded");
+    assert!(env.mgr.doctor().unwrap().is_empty());
+
+    // The doctor notices a removed rule and the fix restores it.
+    multipak_core::capture::set_rule(env.mgr.paths(), "multipak-com.slack.Slack-work", "", "", false).unwrap();
+    let issues = env.mgr.doctor().unwrap();
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].kind, IssueKind::CaptureRuleMissing);
+    env.mgr.apply_fix(issues[0].fix.as_ref().unwrap()).unwrap();
+    assert!(env.mgr.doctor().unwrap().is_empty());
+
+    // Turning it off removes the rule; deleting leaves the user's rules alone.
+    let mut off = inst.to_draft();
+    off.hide_from_capture = false;
+    env.mgr.update(&inst.key(), &off, false).unwrap();
+    assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
+
+    // Leftover rule groups are reported and removable.
+    multipak_core::capture::set_rule(env.mgr.paths(), "multipak-com.slack.Slack-gone", "x", "x", true).unwrap();
+    let issues = env.mgr.doctor().unwrap();
+    assert_eq!(issues[0].kind, IssueKind::OrphanCaptureRule);
+    env.mgr.apply_fix(issues[0].fix.as_ref().unwrap()).unwrap();
+    assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
+
+    let mut on = inst.to_draft();
+    on.hide_from_capture = true;
+    env.mgr.update(&inst.key(), &on, false).unwrap();
+    env.mgr.delete(&inst.key(), false).unwrap();
+    assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
+
+    assert!(!env.mgr.self_hidden_from_capture());
+    env.mgr.set_self_hidden_from_capture(true).unwrap();
+    assert!(env.mgr.self_hidden_from_capture());
+    env.mgr.set_self_hidden_from_capture(false).unwrap();
+    assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
+}
+
+#[test]
+fn hide_from_capture_warns_on_unsupported_desktops() {
+    let mut env = setup();
+    env.mgr.set_capture_support(multipak_core::capture::Support::Unsupported("GNOME".into()));
+    let mut d = slack("Work", &env);
+    d.hide_from_capture = true;
+    let out = env.mgr.create(&d, false).unwrap();
+    assert!(out.warnings.iter().any(|w| w.contains("GNOME")), "{:?}", out.warnings);
 }
 
 #[test]

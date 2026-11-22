@@ -129,6 +129,39 @@ impl KeyFile {
         }
     }
 
+    /// Names of all groups, in file order.
+    pub fn groups(&self) -> Vec<String> {
+        self.lines
+            .iter()
+            .filter_map(|l| match l {
+                Line::Group(g) => Some(g.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Removes a whole group (its header, keys and the blank lines before the next group).
+    /// Returns whether it existed.
+    pub fn remove_group(&mut self, group: &str) -> bool {
+        let Some(start) = self.lines.iter().position(|l| matches!(l, Line::Group(g) if g == group)) else {
+            return false;
+        };
+        let end = self.lines[start + 1..]
+            .iter()
+            .position(|l| matches!(l, Line::Group(_)))
+            .map(|i| start + 1 + i)
+            .unwrap_or(self.lines.len());
+        let was_last = end == self.lines.len();
+        self.lines.drain(start..end);
+        if was_last {
+            // The previous group's trailing blank line would now end the file.
+            while matches!(self.lines.last(), Some(Line::Other(s)) if s.trim().is_empty()) {
+                self.lines.pop();
+            }
+        }
+        true
+    }
+
     /// Serializes the key file, ending with a newline.
     pub fn to_text(&self) -> String {
         let mut out = String::new();
@@ -204,6 +237,17 @@ mod tests {
         assert!(text.ends_with("\n[Environment]\nFOO=bar\n"));
         assert!(kf.remove("Context", "sockets"));
         assert!(!kf.remove("Context", "sockets"));
+    }
+
+    #[test]
+    fn group_removal() {
+        let mut kf = KeyFile::parse("[A]\na=1\n\n[B]\nb=2\n\n[C]\nc=3\n");
+        assert_eq!(kf.groups(), vec!["A", "B", "C"]);
+        assert!(kf.remove_group("B"));
+        assert_eq!(kf.to_text(), "[A]\na=1\n\n[C]\nc=3\n");
+        assert!(kf.remove_group("C"));
+        assert_eq!(kf.to_text(), "[A]\na=1\n");
+        assert!(!kf.remove_group("Z"));
     }
 
     #[test]

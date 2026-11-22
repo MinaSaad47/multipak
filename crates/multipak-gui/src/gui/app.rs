@@ -76,6 +76,8 @@ pub struct MultipakApp {
     pub(super) tasks: HashMap<JobId, Task>,
     pub(super) search_id: egui::Id,
     applied_look: Option<(super::model::ThemeChoice, u32)>,
+    /// Whether Multipak's own window is hidden from capture (`None` while loading).
+    pub(super) self_capture: Option<bool>,
 }
 
 impl MultipakApp {
@@ -105,6 +107,7 @@ impl MultipakApp {
             tasks: HashMap::new(),
             search_id: egui::Id::unique("app-search"),
             applied_look: None,
+            self_capture: None,
         };
         for w in startup_warnings {
             app.toasts.push(ToastKind::Warning, w);
@@ -122,6 +125,8 @@ impl MultipakApp {
         self.worker.spawn(move |_| Output::Apps(mgr.list_apps()));
         let mgr = self.mgr.clone();
         self.worker.spawn(move |_| Output::FlatpakBinary(mgr.flatpak_binary().ok()));
+        let mgr = self.mgr.clone();
+        self.worker.spawn(move |_| Output::SelfCapture(Ok((mgr.self_hidden_from_capture(), Vec::new()))));
         self.details.clear();
         self.disk.clear();
         self.poll_running();
@@ -541,6 +546,19 @@ impl MultipakApp {
                     self.picked(purpose, path);
                 }
             }
+            Output::SelfCapture(r) => match r {
+                Ok((hidden, warnings)) => {
+                    self.self_capture = Some(hidden);
+                    for w in warnings {
+                        self.toasts.push(ToastKind::Warning, w);
+                    }
+                }
+                Err(e) => {
+                    self.error("Could not change the window rule", e);
+                    let mgr = self.mgr.clone();
+                    self.worker.spawn(move |_| Output::SelfCapture(Ok((mgr.self_hidden_from_capture(), Vec::new()))));
+                }
+            },
             Output::Opened(r) => {
                 if let Err(e) = r {
                     self.toasts.push(ToastKind::Error, e);
@@ -680,6 +698,13 @@ impl MultipakApp {
         let mgr = self.mgr.clone();
         self.disk.remove(&key);
         self.worker.spawn(move |_| Output::Deleted(mgr.delete(&key, delete_data)));
+    }
+
+    /// Hides or shows Multipak's own window in screen captures.
+    pub(super) fn set_self_capture(&mut self, hidden: bool) {
+        self.self_capture = None;
+        let mgr = self.mgr.clone();
+        self.worker.spawn(move |_| Output::SelfCapture(mgr.set_self_hidden_from_capture(hidden).map(|w| (hidden, w))));
     }
 
     pub(super) fn open_folder(&mut self, path: PathBuf) {

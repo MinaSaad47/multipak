@@ -63,6 +63,12 @@ Each instance gets a launcher in `~/.local/share/applications/` with its own nam
 (`Slack (Work)`), icon (optionally with a colored badge) and `StartupWMClass`, so it appears in
 your app menu and dock as its own app.
 
+Instances (and Multipak itself) can also be **hidden from screenshots, screen recordings
+and screen sharing**. On KDE Plasma this is done with a KWin window rule ("Exclude from screen
+capture") matched on the instance's window class; Multipak adds and removes only its own rules
+in `~/.config/kwinrulesrc` and asks KWin to reload them. Other desktops have no equivalent
+feature, so there the option is saved but has no effect.
+
 If you choose a data folder **outside** `~/.var/app/<app-id>/`, Multipak shows you the exact
 `flatpak override --user --filesystem=<dir> <app-id>` command, asks first, and removes exactly
 that permission again when you delete the instance.
@@ -140,7 +146,8 @@ Make sure `~/.local/bin` is in your `PATH`.
 3. **Create an instance** with **＋ New instance** (**Ctrl+N**). Give it a name such as
    "Work". The short name and window class are generated for you and can be changed. You
    can also pick another launch type, a custom data folder, extra arguments (one per line),
-   environment variables (`KEY=value`, one per line), a colored icon badge, and autostart.
+   environment variables (`KEY=value`, one per line), a colored icon badge, autostart, and
+   hiding the instance from screenshots and screen sharing (KDE Plasma).
    The dialog validates everything as you type and shows a live preview of the exact launch
    command and `.desktop` file.
 4. **Launch** it from its card or from your app menu, where it appears as "Slack (Work)". The
@@ -179,6 +186,7 @@ multipak [--verbose] [--log-file] [COMMAND]
 | `multipak delete INSTANCE [--delete-data [--confirm SHORT_NAME]]` | Delete an instance; data is kept unless `--delete-data` (asks you to type the short name, or pass `--confirm`) |
 | `multipak backup INSTANCE [-o FILE]` | Back up the data folder to a `.tar.zst` file |
 | `multipak restore FILE [--into INSTANCE \| --as SHORT_NAME] [--grant-access]` | Restore a backup into its instance (recreated if missing), another instance, or a new one |
+| `multipak capture on\|off (INSTANCE \| --self)` | Hide an instance, or Multipak's own window, from screenshots, recordings and screen sharing (KDE Plasma) |
 | `multipak doctor [--fix [--remove-missing]]` | Check the setup; `--fix` applies the fixes (exit code 2 if problems remain) |
 | `multipak export FILE [--with-data]` | Export the setup as JSON, optionally with data backups |
 | `multipak import FILE [--rename] [--grant-access] [--no-data]` | Import an exported setup |
@@ -196,6 +204,7 @@ multipak [--verbose] [--log-file] [COMMAND]
 | `--env KEY=VALUE` | Environment variable; repeatable |
 | `--badge-color '#RRGGBB'` / `--badge-letter X` | Colored badge on the launcher icon |
 | `--autostart` | Start at login |
+| `--hide-from-capture` | Hide from screenshots, recordings and screen sharing (KDE Plasma) |
 
 Examples:
 
@@ -241,6 +250,7 @@ to add an app to the built-in table.
 | `~/.local/share/applications/multipak-<app-id>-<short-name>.desktop` | Launcher |
 | `~/.config/autostart/multipak-<app-id>-<short-name>.desktop` | Autostart entry (if enabled) |
 | `~/.local/share/icons/multipak/<app-id>-<short-name>.png` | Badge icon (if enabled) |
+| `~/.config/kwinrulesrc` | Only on KDE Plasma, for instances hidden from screen capture: rule groups named `multipak-…` |
 | `~/.local/state/multipak/` | Launch output of each instance, and the log file (if enabled) |
 | `~/.local/share/flatpak/overrides/<app-id>` | Only for custom data folders, after you allowed it |
 
@@ -294,6 +304,9 @@ as `instances.toml.v<N>.bak`). Files from newer versions are refused rather than
   `-CreateProfile` becomes its default profile. Start the app normally once before creating
   instances if you want to keep a separate default profile. Deleting an instance leaves its
   entry in the app's `profiles.ini` (the browser ignores entries whose folder is gone).
+- **Hiding from screen capture** needs KDE Plasma 6 (KWin window rules). GNOME, Sway and other
+  compositors offer no way for an app to opt out of capture. The rule matches the window class,
+  so an app that ignores its `--class`/`--name` on native Wayland (see above) is not hidden.
 - **Running detection** reads `/proc` of the sandbox processes. On systems mounted with
   `hidepid`, instances may show as "Not running" even when they are.
 - **Folder access** is granted with per-user overrides (`flatpak override --user`) only.

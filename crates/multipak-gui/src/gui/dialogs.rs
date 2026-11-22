@@ -479,6 +479,19 @@ impl MultipakApp {
                     ui.label("Startup");
                     ui.checkbox(&mut form.autostart, "Start automatically when I log in");
                     ui.end_row();
+
+                    ui.label("Privacy");
+                    ui.vertical(|ui| {
+                        ui.checkbox(
+                            &mut form.hide_from_capture,
+                            "Hide from screenshots, recordings and screen sharing",
+                        );
+                        let support = self.mgr.capture_support();
+                        if form.hide_from_capture || !support.is_supported() {
+                            ui.weak(support.description());
+                        }
+                    });
+                    ui.end_row();
                 });
 
                 for w in &eval.warnings {
@@ -566,6 +579,7 @@ impl MultipakApp {
     fn settings_dialog(&mut self, ctx: &egui::Context) -> bool {
         let paths = self.mgr.paths().clone();
         let mut open: Option<std::path::PathBuf> = None;
+        let mut toggle_self: Option<bool> = None;
         let (out, esc) = modal(ctx, "settings", 520.0, |ui| {
             ui.heading("Settings");
             ui.add_space(4.0);
@@ -583,6 +597,22 @@ impl MultipakApp {
                         .step_by(0.05)
                         .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
                 );
+                ui.end_row();
+                ui.label("Privacy");
+                ui.vertical(|ui| {
+                    match self.self_capture {
+                        Some(mut hidden) => {
+                            let r = ui.checkbox(&mut hidden, "Hide Multipak from screenshots and screen sharing");
+                            if r.changed() {
+                                toggle_self = Some(hidden);
+                            }
+                        }
+                        None => {
+                            ui.spinner();
+                        }
+                    }
+                    ui.weak(self.mgr.capture_support().description());
+                });
                 ui.end_row();
             });
             ui.add_space(8.0);
@@ -619,6 +649,9 @@ impl MultipakApp {
             });
             out
         });
+        if let Some(hidden) = toggle_self {
+            self.set_self_capture(hidden);
+        }
         if let Some(dir) = open {
             if let Err(e) = std::fs::create_dir_all(&dir) {
                 self.toasts.push(style::ToastKind::Error, format!("Could not create {}: {e}", dir.display()));

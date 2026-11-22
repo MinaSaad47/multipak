@@ -401,6 +401,11 @@ impl MultipakApp {
                             ui.separator();
                             ui.weak("autostart");
                         }
+                        if inst.hide_from_capture {
+                            ui.separator();
+                            ui.weak("hidden from capture")
+                                .on_hover_text("Hidden from screenshots, recordings and screen sharing (KDE Plasma)");
+                        }
                     });
                     let dir = inst.resolved_data_dir(self.mgr.paths());
                     ui.add(egui::Label::new(RichText::new(self.mgr.paths().tildify(&dir)).small().weak()).truncate())

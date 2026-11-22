@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::apptype::{self, AppTypeTable, DetectInput, Detection};
 use crate::backup::{self, BackupManifest, CancelToken, ProgressFn};
+use crate::capture;
 use crate::config::{Config, ConfigStore};
 use crate::desktop::{self, LauncherInfo};
 use crate::error::{Error, IoContext, Result};
@@ -139,7 +140,10 @@ pub struct Manager {
     store: ConfigStore,
     types: AppTypeTable,
     launch_grace: Duration,
+    capture_support: capture::Support,
 }
+
+const SELF_RULE_DESCRIPTION: &str = "Multipak: hide Multipak from screen capture";
 
 impl Manager {
     /// Creates a manager. Fails only if the user's app-type table is unreadable.
@@ -150,7 +154,14 @@ impl Manager {
 
     /// Creates a manager with an explicit app-type table.
     pub fn with_types(host: Arc<dyn Host>, paths: Paths, types: AppTypeTable) -> Self {
-        Self { store: ConfigStore::new(paths.config_file()), host, paths, types, launch_grace: DEFAULT_LAUNCH_GRACE }
+        Self {
+            store: ConfigStore::new(paths.config_file()),
+            host,
+            paths,
+            types,
+            launch_grace: DEFAULT_LAUNCH_GRACE,
+            capture_support: capture::detect(|k| std::env::var_os(k)),
+        }
     }
 
     pub fn set_launch_grace(&mut self, grace: Duration) {
@@ -296,7 +307,65 @@ impl Manager {
             remove_if_exists(&autostart_path)?;
         }
         warnings.extend(self.refresh_desktop_database());
+        warnings.extend(self.apply_capture_rule(instance)?);
         Ok(warnings)
+    }
+
+    /// Description written into the KWin rule of an instance.
+    pub fn capture_rule_description(instance: &Instance) -> String {
+        format!("Multipak: hide {} from screen capture", instance.display_name())
+    }
+
+    /// Writes or removes the instance's "exclude from capture" window rule.
+    fn apply_capture_rule(&self, instance: &Instance) -> Result<Vec<String>> {
+        let group = capture::instance_group(&instance.app_id, &instance.slug);
+        let changed = capture::set_rule(
+            &self.paths,
+            &group,
+            &instance.wm_class,
+            &Self::capture_rule_description(instance),
+            instance.hide_from_capture,
+        )?;
+        Ok(self.after_rule_change(changed, instance.hide_from_capture))
+    }
+
+    /// Reloads KWin after a rule change and explains when the setting cannot take effect.
+    fn after_rule_change(&self, changed: bool, enabled: bool) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if enabled && !self.capture_support.is_supported() {
+            warnings.push(self.capture_support.description());
+        }
+        if changed
+            && self.capture_support.is_supported()
+            && let Err(e) = capture::reconfigure_kwin(self.host.as_ref())
+        {
+            warnings.push(format!(
+                "Saved the window rule, but could not ask KWin to reload it ({e}). It takes effect after you log in again."
+            ));
+        }
+        warnings
+    }
+
+    /// Whether Multipak's own window is hidden from screen capture.
+    pub fn self_hidden_from_capture(&self) -> bool {
+        capture::has_rule(&self.paths, capture::SELF_GROUP, capture::SELF_WM_CLASS, SELF_RULE_DESCRIPTION)
+    }
+
+    /// Hides (or shows) Multipak's own window in screenshots and screen sharing.
+    pub fn set_self_hidden_from_capture(&self, hidden: bool) -> Result<Vec<String>> {
+        let changed =
+            capture::set_rule(&self.paths, capture::SELF_GROUP, capture::SELF_WM_CLASS, SELF_RULE_DESCRIPTION, hidden)?;
+        Ok(self.after_rule_change(changed, hidden))
+    }
+
+    /// How (and whether) this desktop can hide windows from capture.
+    pub fn capture_support(&self) -> &capture::Support {
+        &self.capture_support
+    }
+
+    /// Overrides the detected desktop support (used by tests).
+    pub fn set_capture_support(&mut self, support: capture::Support) {
+        self.capture_support = support;
     }
 
     fn remove_launchers(&self, instance: &Instance) -> Result<Vec<PathBuf>> {
@@ -311,6 +380,10 @@ impl Manager {
             }
         }
         let _ = self.refresh_desktop_database();
+        let group = capture::instance_group(&instance.app_id, &instance.slug);
+        if capture::set_rule(&self.paths, &group, "", "", false)? {
+            let _ = self.after_rule_change(true, false);
+        }
         Ok(removed)
     }
 

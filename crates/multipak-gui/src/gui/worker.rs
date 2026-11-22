@@ -50,6 +50,7 @@ pub enum Output {
     Imported(Result<ImportReport, Error>),
     Picked(PickPurpose, Option<PathBuf>),
     Opened(Result<(), String>),
+    SelfCapture(Result<(bool, Vec<String>), Error>),
 }
 
 pub enum Msg {

@@ -82,6 +82,10 @@ pub struct Instance {
     pub badge: Option<Badge>,
     #[serde(default)]
     pub autostart: bool,
+    /// Hide the instance's windows from screenshots, recording and screen sharing
+    /// (KDE Plasma; see [`crate::capture`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_from_capture: bool,
     /// A `--filesystem` override Multipak added for this instance (removed on delete).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_override: Option<String>,
@@ -118,6 +122,7 @@ impl Instance {
             env: self.env.clone(),
             badge: self.badge.clone(),
             autostart: self.autostart,
+            hide_from_capture: self.hide_from_capture,
         }
     }
 }
@@ -136,6 +141,8 @@ pub struct InstanceDraft {
     pub env: BTreeMap<String, String>,
     pub badge: Option<Badge>,
     pub autostart: bool,
+    #[serde(default)]
+    pub hide_from_capture: bool,
 }
 
 /// The form field a validation error belongs to.
@@ -208,6 +215,7 @@ impl InstanceDraft {
             env: BTreeMap::new(),
             badge: None,
             autostart: false,
+            hide_from_capture: false,
         }
     }
 
@@ -341,6 +349,7 @@ impl InstanceDraft {
                 env: self.env.clone(),
                 badge: self.badge.clone(),
                 autostart: self.autostart,
+                hide_from_capture: self.hide_from_capture,
                 managed_override: None,
                 created: OffsetDateTime::now_utc(),
             },

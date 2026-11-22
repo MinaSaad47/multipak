@@ -92,6 +92,18 @@ pub enum Command {
         #[arg(long)]
         grant_access: bool,
     },
+    /// Hide windows from screenshots, recordings and screen sharing (KDE Plasma).
+    Capture {
+        /// `on` to hide, `off` to show again.
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+        /// The instance to change.
+        #[arg(required_unless_present = "self_window", conflicts_with = "self_window")]
+        instance: Option<String>,
+        /// Change Multipak's own window instead of an instance.
+        #[arg(long = "self")]
+        self_window: bool,
+    },
     /// Check launchers, folders and installed apps.
     Doctor {
         /// Apply the available fixes (instances of uninstalled apps are only removed with --remove-missing).
@@ -159,6 +171,9 @@ pub struct CreateArgs {
     /// Start this instance when you log in.
     #[arg(long)]
     pub autostart: bool,
+    /// Hide this instance from screenshots, recordings and screen sharing (KDE Plasma).
+    #[arg(long)]
+    pub hide_from_capture: bool,
 }
 
 /// Runs one CLI command.
@@ -227,6 +242,9 @@ pub fn run(command: Command, mgr: &Manager) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Doctor { fix, remove_missing } => doctor(mgr, fix, remove_missing),
+        Command::Capture { state, instance, self_window } => {
+            capture(mgr, state == "on", instance.as_deref(), self_window)
+        }
         Command::Export { file, with_data } => {
             let cancel = cancel_on_ctrl_c();
             let reporter = ProgressPrinter::new("Exporting");
@@ -380,6 +398,7 @@ fn create(mgr: &Manager, a: CreateArgs) -> anyhow::Result<ExitCode> {
     draft.env = env;
     draft.badge = a.badge_color.map(|color| Badge { color, letter: a.badge_letter });
     draft.autostart = a.autostart;
+    draft.hide_from_capture = a.hide_from_capture;
     if let Some(w) = details.detection.single_instance.warning() {
         eprintln!("warning: {w}");
     }
@@ -434,6 +453,26 @@ fn delete(mgr: &Manager, query: &str, delete_data: bool, confirm: Option<String>
     } else {
         println!("  kept data folder {}", report.data_dir.display());
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn capture(mgr: &Manager, hide: bool, instance: Option<&str>, self_window: bool) -> anyhow::Result<ExitCode> {
+    let (what, warnings) = if self_window {
+        ("Multipak".to_string(), mgr.set_self_hidden_from_capture(hide)?)
+    } else {
+        let query = instance.context("name an instance or pass --self")?;
+        let key = resolve(mgr, query)?;
+        let config = mgr.load()?;
+        let inst = config.get(&key).context("instance disappeared")?;
+        let mut draft = inst.to_draft();
+        draft.hide_from_capture = hide;
+        (inst.display_name(), mgr.update(&key, &draft, false)?.warnings)
+    };
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+    let verb = if hide { "is now hidden from" } else { "is visible again in" };
+    println!("{what} {verb} screenshots, recordings and screen sharing.");
     Ok(ExitCode::SUCCESS)
 }
 
@@ -587,5 +626,10 @@ mod tests {
         assert!(Cli::try_parse_from(["multipak", "delete", "work", "--confirm", "work"]).is_err());
         assert!(Cli::try_parse_from(["multipak", "delete", "work", "--delete-data", "--confirm", "work"]).is_ok());
         assert!(Cli::try_parse_from(["multipak", "restore", "f.tar.zst", "--into", "a", "--as", "b"]).is_err());
+        assert!(Cli::try_parse_from(["multipak", "capture", "on", "work"]).is_ok());
+        assert!(Cli::try_parse_from(["multipak", "capture", "off", "--self"]).is_ok());
+        assert!(Cli::try_parse_from(["multipak", "capture", "on"]).is_err());
+        assert!(Cli::try_parse_from(["multipak", "capture", "on", "work", "--self"]).is_err());
+        assert!(Cli::try_parse_from(["multipak", "capture", "maybe", "work"]).is_err());
     }
 }

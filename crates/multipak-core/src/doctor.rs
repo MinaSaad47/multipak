@@ -24,7 +24,9 @@ pub enum IssueKind {
     AutostartStale,
     BadgeIconMissing,
     OverrideMissing,
+    CaptureRuleMissing,
     OrphanFile,
+    OrphanCaptureRule,
 }
 
 /// A one-click repair.
@@ -40,6 +42,8 @@ pub enum Fix {
     RemoveFile(PathBuf),
     /// Add the instance's filesystem override again.
     ReapplyOverride(InstanceKey),
+    /// Remove a leftover Multipak window rule from `kwinrulesrc`.
+    RemoveCaptureRule(String),
 }
 
 impl Fix {
@@ -50,6 +54,7 @@ impl Fix {
             Self::RemoveInstance(_) => "Remove instance (keep data)",
             Self::RemoveFile(_) => "Delete file",
             Self::ReapplyOverride(_) => "Restore folder access",
+            Self::RemoveCaptureRule(_) => "Remove window rule",
         }
     }
 }
@@ -177,6 +182,20 @@ impl Manager {
                     Some(Fix::WriteLaunchers(key.clone())),
                 ));
             }
+            if inst.hide_from_capture
+                && !crate::capture::has_rule(
+                    paths,
+                    &crate::capture::instance_group(&inst.app_id, &inst.slug),
+                    &inst.wm_class,
+                    &Manager::capture_rule_description(inst),
+                )
+            {
+                issues.push(issue(
+                    IssueKind::CaptureRuleMissing,
+                    "The window rule that hides this instance from screen capture is missing or out of date.".into(),
+                    Some(Fix::WriteLaunchers(key.clone())),
+                ));
+            }
             if let Some(dir) = &inst.managed_override
                 && !flatpak::override_has_filesystem(paths, &inst.app_id, dir)
             {
@@ -217,6 +236,22 @@ impl Manager {
                         fix: Some(Fix::RemoveFile(path)),
                     });
                 }
+            }
+        }
+        for group in crate::capture::instance_groups(paths) {
+            let used = config
+                .instances
+                .iter()
+                .any(|i| i.hide_from_capture && crate::capture::instance_group(&i.app_id, &i.slug) == group);
+            if !used {
+                issues.push(Issue {
+                    key: None,
+                    kind: IssueKind::OrphanCaptureRule,
+                    message: format!(
+                        "The KWin window rule {group} belongs to an instance that no longer hides from capture."
+                    ),
+                    fix: Some(Fix::RemoveCaptureRule(group)),
+                });
             }
         }
         if let Ok(entries) = fs::read_dir(paths.badge_icons_dir()) {
@@ -271,6 +306,14 @@ impl Manager {
                 }
                 fs::remove_file(path)
                     .map_err(|e| Error::Io { context: format!("could not remove {}", path.display()), source: e })
+            }
+            Fix::RemoveCaptureRule(group) => {
+                if crate::capture::set_rule(self.paths(), group, "", "", false)?
+                    && self.capture_support().is_supported()
+                {
+                    crate::capture::reconfigure_kwin(self.host())?;
+                }
+                Ok(())
             }
             Fix::ReapplyOverride(k) => {
                 let inst = get(k)?;

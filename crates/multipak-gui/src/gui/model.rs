@@ -155,6 +155,7 @@ pub struct InstanceForm {
     pub badge_color: [u8; 3],
     pub badge_letter: String,
     pub autostart: bool,
+    pub hide_from_capture: bool,
     /// The user's consent to add a Flatpak filesystem override.
     pub allow_override: bool,
     pub saving: bool,
@@ -213,6 +214,7 @@ impl InstanceForm {
             badge_color: BADGE_COLORS[count % BADGE_COLORS.len()],
             badge_letter: "I".to_string(),
             autostart: false,
+            hide_from_capture: false,
             allow_override: false,
             saving: false,
             error: None,
@@ -241,6 +243,7 @@ impl InstanceForm {
             badge_color: badge.as_ref().and_then(|b| b.rgb().ok()).unwrap_or(BADGE_COLORS[0]),
             badge_letter: badge.and_then(|b| b.letter).unwrap_or_default(),
             autostart: instance.autostart,
+            hide_from_capture: instance.hide_from_capture,
             allow_override: instance.managed_override.is_some(),
             saving: false,
             error: None,
@@ -334,6 +337,7 @@ impl InstanceForm {
             env,
             badge,
             autostart: self.autostart,
+            hide_from_capture: self.hide_from_capture,
         })
     }
 
@@ -510,6 +514,7 @@ mod tests {
         inst.extra_args = vec!["--a".into(), "b c".into()];
         inst.env.insert("LANG".into(), "C".into());
         inst.badge = Some(Badge { color: "#e01b24".into(), letter: Some("W".into()) });
+        inst.hide_from_capture = true;
         let f = InstanceForm::edit(&inst, Some(Strategy::Electron));
         let draft = f.to_draft().unwrap();
         assert_eq!(draft, inst.to_draft());

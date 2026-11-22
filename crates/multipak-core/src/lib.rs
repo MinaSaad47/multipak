@@ -12,6 +12,7 @@
 pub mod apptype;
 pub mod atomic;
 pub mod backup;
+pub mod capture;
 pub mod config;
 pub mod desktop;
 pub mod doctor;
