@@ -20,17 +20,18 @@ use crate::paths::Paths;
 
 const BUILTIN_TABLE: &str = include_str!("../data/app_types.toml");
 
-/// How an instance is given its own data folder.
+/// The kind of app. Every kind is isolated the same way (see [`crate::launch::launch_spec`]);
+/// the kind only decides the extra arguments that let copies run side by side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Strategy {
-    /// `--env=XDG_CONFIG_HOME=<dir>` and `--class=<wmclass>`.
+    /// `--class=<wmclass>`.
     Electron,
-    /// `--user-data-dir=<dir>` and `--class=<wmclass>`.
+    /// `--class=<wmclass>`.
     Chromium,
-    /// A dedicated profile: `-profile <dir> --new-instance`.
+    /// `--new-instance --name=<wmclass> --class=<wmclass>`.
     Firefox,
-    /// `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` inside the data folder.
+    /// No extra arguments.
     Generic,
 }
 
@@ -42,24 +43,20 @@ impl Strategy {
             Self::Electron => "Electron app",
             Self::Chromium => "Chromium-based browser",
             Self::Firefox => "Firefox-based browser",
-            Self::Generic => "Generic (XDG folders)",
+            Self::Generic => "Generic",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
             Self::Electron => {
-                "Sets XDG_CONFIG_HOME to the data folder and passes --class. Works for Slack, Discord, Obsidian, Signal and most Electron apps."
+                "Own app folder, plus --class for a separate window class. For Slack, Discord, Obsidian, Signal and most Electron apps."
             }
             Self::Chromium => {
-                "Passes --user-data-dir and --class. Works for Chrome, Chromium, Brave, Edge and Vivaldi."
+                "Own app folder, plus --class for a separate window class. For Chrome, Chromium, Brave, Edge and Vivaldi."
             }
-            Self::Firefox => {
-                "Creates a dedicated profile in the data folder and starts it with -profile --new-instance."
-            }
-            Self::Generic => {
-                "Points XDG_CONFIG_HOME, XDG_DATA_HOME and XDG_CACHE_HOME at subfolders of the data folder."
-            }
+            Self::Firefox => "Own app folder, plus --new-instance, --name and --class so copies run side by side.",
+            Self::Generic => "Own app folder and nothing else. Works with any app.",
         }
     }
 

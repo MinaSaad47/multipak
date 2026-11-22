@@ -62,7 +62,7 @@ pub struct MultipakApp {
     pub(super) entries: Vec<AppEntry>,
     pub(super) config: Config,
     pub(super) config_error: Option<String>,
-    pub(super) flatpak_bin: Option<PathBuf>,
+    pub(super) flatpak_bin: Option<multipak_core::launch::Binaries>,
     pub(super) running: Vec<RunningInstance>,
     running_inflight: bool,
     last_running_poll: Option<Instant>,
@@ -115,7 +115,19 @@ impl MultipakApp {
         // Bring the capture helper in line with the setup (and clean up rules from older
         // versions) without waiting for the next save.
         let mgr = app.mgr.clone();
-        app.worker.spawn(move |_| Output::CaptureSynced(mgr.sync_capture()));
+        app.worker.spawn(move |_| {
+            let mut result = mgr.sync_capture();
+            // Data folders and launchers from older versions are brought up to date.
+            match mgr.upgrade() {
+                Ok(w) => {
+                    if let Ok(warnings) = &mut result {
+                        warnings.extend(w);
+                    }
+                }
+                Err(e) => tracing::warn!("could not update launchers: {e}"),
+            }
+            Output::CaptureSynced(result)
+        });
         app.refresh_all();
         app
     }
@@ -128,7 +140,7 @@ impl MultipakApp {
         let mgr = self.mgr.clone();
         self.worker.spawn(move |_| Output::Apps(mgr.list_apps()));
         let mgr = self.mgr.clone();
-        self.worker.spawn(move |_| Output::FlatpakBinary(mgr.flatpak_binary().ok()));
+        self.worker.spawn(move |_| Output::FlatpakBinary(mgr.binaries().ok()));
         let mgr = self.mgr.clone();
         self.worker.spawn(move |_| Output::SelfCapture(Ok((mgr.self_hidden_from_capture(), Vec::new()))));
         self.details.clear();
@@ -733,9 +745,8 @@ impl MultipakApp {
 
     pub(super) fn copy_launch_command(&mut self, ctx: &egui::Context, key: &InstanceKey) {
         let Some(inst) = self.instance(key) else { return };
-        let bin = self.flatpak_bin.clone().unwrap_or_else(|| PathBuf::from("flatpak"));
-        let dir = inst.resolved_data_dir(self.mgr.paths());
-        let cmd = multipak_core::launch::launch_spec(&bin, inst, &dir).display();
+        let bins = self.flatpak_bin.clone().unwrap_or_else(multipak_core::launch::Binaries::standard);
+        let cmd = multipak_core::launch::launch_spec(&bins, self.mgr.paths(), inst).display();
         ctx.copy_text(cmd);
         self.toasts.push(ToastKind::Info, "Launch command copied to the clipboard.");
     }

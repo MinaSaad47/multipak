@@ -94,7 +94,7 @@ impl Manager {
         let config = self.load()?;
         let paths = self.paths();
         let mut issues = Vec::new();
-        let flatpak_bin = match self.flatpak_binary() {
+        let flatpak_bin = match self.binaries() {
             Ok(b) => Some(b),
             Err(_) => {
                 issues.push(Issue {
@@ -299,7 +299,7 @@ impl Manager {
             Fix::CreateDataDir(k) => {
                 let inst = get(k)?;
                 let dir = inst.resolved_data_dir(self.paths());
-                for d in crate::launch::dirs_to_create(&inst, &dir) {
+                for d in crate::launch::dirs_to_create(&dir) {
                     fs::create_dir_all(&d)
                         .map_err(|e| Error::Io { context: format!("could not create {}", d.display()), source: e })?;
                 }

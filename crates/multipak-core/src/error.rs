@@ -31,6 +31,9 @@ pub enum Error {
     #[error("the `flatpak` command was not found; install Flatpak and make sure it is in PATH")]
     FlatpakMissing,
 
+    #[error("bubblewrap (`bwrap`) was not found; it comes with Flatpak, so reinstall Flatpak or install bubblewrap")]
+    BwrapMissing,
+
     #[error("invalid {field}: {reason}")]
     Invalid { field: &'static str, reason: String },
 

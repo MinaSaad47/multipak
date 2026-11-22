@@ -95,8 +95,23 @@ fn create_writes_launcher_and_data_dir() {
     assert_eq!(kf.get(g, "Icon"), Some("com.slack.Slack"));
     assert_eq!(kf.get(g, "Categories"), Some("Network;InstantMessaging;"));
     let exec = multipak_core::desktop::parse_exec_value(kf.get(g, "Exec").unwrap());
-    assert_eq!(exec[0], "/usr/bin/flatpak");
-    assert!(exec.contains(&format!("--env=XDG_CONFIG_HOME={}", data.display())));
+    let app_dir = env.home.join(".var/app/com.slack.Slack");
+    assert_eq!(
+        exec[..8],
+        [
+            "/usr/bin/bwrap",
+            "--dev-bind",
+            "/",
+            "/",
+            "--bind",
+            &data.display().to_string(),
+            &app_dir.display().to_string(),
+            "--"
+        ]
+    );
+    assert_eq!(exec[8], "/usr/bin/flatpak");
+    assert!(!exec.iter().any(|a| a.contains("XDG_CONFIG_HOME")));
+    assert!(multipak_core::layout::is_current(&data));
     assert!(!kf.get(g, "Exec").unwrap().contains("$HOME"));
     assert_eq!(
         env.host.calls_matching(&[&paths.applications_dir().display().to_string()]).len(),
@@ -183,8 +198,9 @@ fn launch_builds_command_and_reports_failures() {
     let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
     assert!(matches!(env.mgr.launch(&inst.key()).unwrap(), LaunchOutcome::Running { .. }));
     let spec = env.host.launches().pop().unwrap();
-    assert_eq!(spec.program, "/usr/bin/flatpak");
-    assert_eq!(spec.args[1], "--env=MULTIPAK_INSTANCE=com.slack.Slack/work");
+    assert_eq!(spec.program, "/usr/bin/bwrap");
+    assert_eq!(spec.args[7], "/usr/bin/flatpak");
+    assert_eq!(spec.args[9], "--env=MULTIPAK_INSTANCE=com.slack.Slack/work");
     assert!(spec.args.contains(&"--class=multipak-slack-work".to_string()));
 
     env.host.set_launch_outcome(LaunchOutcome::Failed { code: Some(1), log_tail: "error: app not installed".into() });
@@ -194,21 +210,29 @@ fn launch_builds_command_and_reports_failures() {
 }
 
 #[test]
-fn firefox_profile_is_created_once() {
+fn firefox_uses_its_default_profile_inside_the_instance() {
     let env = setup();
     let d = InstanceDraft::new("org.mozilla.firefox", "Firefox", "Client A", Strategy::Firefox, &[]);
     let inst = env.mgr.create(&d, false).unwrap().instance;
-    let calls = env.host.calls_matching(&["run", "org.mozilla.firefox", "-CreateProfile"]);
-    assert_eq!(calls.len(), 1);
-    let dir = inst.resolved_data_dir(env.mgr.paths());
-    assert_eq!(calls[0].args[3], format!("multipak-client-a {}", dir.display()));
-    fs::write(dir.join("times.json"), "{}").unwrap();
     env.mgr.launch(&inst.key()).unwrap();
-    assert_eq!(env.host.calls_matching(&["run", "org.mozilla.firefox", "-CreateProfile"]).len(), 1);
     let spec = env.host.launches().pop().unwrap();
-    let pos = spec.args.iter().position(|a| a == "-profile").unwrap();
-    assert_eq!(spec.args[pos + 1], dir.display().to_string());
+    assert!(!spec.args.iter().any(|a| a.contains("profile")), "{:?}", spec.args);
     assert!(spec.args.contains(&"--new-instance".to_string()));
+}
+
+#[test]
+fn launch_moves_old_data_into_place_once() {
+    let env = setup();
+    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let dir = inst.resolved_data_dir(env.mgr.paths());
+    // A data folder written by Multipak 0.1, where it was Slack's XDG_CONFIG_HOME.
+    fs::remove_file(dir.join(multipak_core::layout::MARKER)).unwrap();
+    fs::create_dir_all(dir.join("Slack")).unwrap();
+    fs::write(dir.join("Slack/Cookies"), "x").unwrap();
+    assert!(env.mgr.upgrade().unwrap().is_empty());
+    assert!(dir.join("config/Slack/Cookies").is_file());
+    env.mgr.launch(&inst.key()).unwrap();
+    assert!(dir.join("config/Slack/Cookies").is_file());
 }
 
 #[test]
@@ -230,13 +254,16 @@ fn running_detection_and_stop() {
             ..Default::default()
         },
     );
-    // Sandbox 222: environment unreadable, identified by its --class argument.
+    // Sandbox 222: marker directly on the app process.
     env.host.add_process(
         21,
+        FakeProcess { environ: vec![format!("MULTIPAK_INSTANCE={}", home.key())], ..Default::default() },
+    );
+    // Sandbox 333: the app's normal launcher. Instance arguments alone do not count.
+    env.host.add_process(
+        31,
         FakeProcess { cmdline: vec!["/app/slack".into(), format!("--class={}", home.wm_class)], ..Default::default() },
     );
-    // Sandbox 333: the app's normal launcher.
-    env.host.add_process(31, FakeProcess { cmdline: vec!["/app/slack".into()], ..Default::default() });
 
     let running = env.mgr.running().unwrap();
     assert_eq!(running[0].key.as_ref(), Some(&work.key()));
@@ -336,9 +363,9 @@ fn backup_restore_and_clear_cache() {
     let env = setup();
     let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
     let data = inst.resolved_data_dir(env.mgr.paths());
-    fs::create_dir_all(data.join("Slack/Cache")).unwrap();
-    fs::write(data.join("Slack/Cache/blob"), vec![0u8; 50_000]).unwrap();
-    fs::write(data.join("Slack/settings.json"), "{}").unwrap();
+    fs::create_dir_all(data.join("config/Slack/Cache")).unwrap();
+    fs::write(data.join("config/Slack/Cache/blob"), vec![0u8; 50_000]).unwrap();
+    fs::write(data.join("config/Slack/settings.json"), "{}").unwrap();
     let cancel = CancelToken::new();
     assert!(env.mgr.disk_usage(&inst.key(), &cancel).unwrap() >= 50_000);
 
@@ -346,12 +373,12 @@ fn backup_restore_and_clear_cache() {
     env.mgr.backup(&inst.key(), &archive, &|_| {}, &cancel).unwrap();
 
     let report = env.mgr.clear_cache(&inst.key(), &cancel).unwrap();
-    assert_eq!(report.dirs, vec![data.join("Slack/Cache")]);
-    assert!(!data.join("Slack/Cache/blob").exists());
-    assert!(data.join("Slack/settings.json").exists());
+    assert_eq!(report.dirs, vec![data.join("cache"), data.join("config/Slack/Cache")]);
+    assert!(!data.join("config/Slack/Cache/blob").exists());
+    assert!(data.join("config/Slack/settings.json").exists());
 
     env.mgr.restore(&archive, RestoreTarget::Existing(inst.key()), &|_| {}, &cancel).unwrap();
-    assert!(data.join("Slack/Cache/blob").exists());
+    assert!(data.join("config/Slack/Cache/blob").exists());
 
     let copy = env
         .mgr
@@ -364,7 +391,7 @@ fn backup_restore_and_clear_cache() {
         .unwrap();
     assert_eq!(copy.slug, "work-copy");
     assert_eq!(copy.name, "Work (copy)");
-    assert!(copy.resolved_data_dir(env.mgr.paths()).join("Slack/settings.json").exists());
+    assert!(copy.resolved_data_dir(env.mgr.paths()).join("config/Slack/settings.json").exists());
     assert!(matches!(
         env.mgr.restore(&archive, RestoreTarget::New { slug: None, allow_override: false }, &|_| {}, &cancel),
         Err(Error::DuplicateSlug { .. })

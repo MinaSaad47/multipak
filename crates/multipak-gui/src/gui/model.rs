@@ -2,7 +2,7 @@
 //! confirmation, the app list and small formatting helpers.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use multipak_core::config::Config;
 use multipak_core::instance::{self, DraftContext, Field, FieldError, Instance, InstanceDraft, InstanceKey};
@@ -346,7 +346,7 @@ impl InstanceForm {
         &self,
         paths: &Paths,
         existing: &[Instance],
-        flatpak_bin: Option<&Path>,
+        flatpak_bin: Option<&multipak_core::launch::Binaries>,
         categories: &[String],
     ) -> FormEval {
         let mut eval = FormEval::default();
@@ -369,8 +369,8 @@ impl InstanceForm {
                     if existing.iter().any(|i| &i.key() == k && i.managed_override.is_some() && i.managed_override == v.needs_override));
                 eval.needs_override = v.needs_override.clone().filter(|_| !already_ours);
                 eval.warnings = v.warnings.clone();
-                let bin = flatpak_bin.map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("/usr/bin/flatpak"));
-                eval.preview = Some(manager::preview(paths, &v, &bin, categories));
+                let bins = flatpak_bin.cloned().unwrap_or_else(multipak_core::launch::Binaries::standard);
+                eval.preview = Some(manager::preview(paths, &v, &bins, categories));
             }
             Err(errs) => {
                 for e in errs {
@@ -471,7 +471,8 @@ mod tests {
         let eval = f.evaluate(&paths(), &existing, None, &[]);
         assert!(eval.errors.is_empty(), "{:?}", eval.errors);
         let preview = eval.preview.clone().unwrap();
-        assert!(preview.command.starts_with("/usr/bin/flatpak run"));
+        assert!(preview.command.starts_with("/usr/bin/bwrap --dev-bind / / --bind "));
+        assert!(preview.command.contains(" -- /usr/bin/flatpak run "));
         assert!(preview.desktop_file.contains("Name=Slack (Instance 2)"));
         assert!(f.can_submit(&eval));
 

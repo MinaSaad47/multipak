@@ -30,7 +30,7 @@ pub enum PickPurpose {
 pub enum Output {
     Apps(Result<Vec<FlatpakApp>, Error>),
     Config(Result<Config, Error>),
-    FlatpakBinary(Option<PathBuf>),
+    FlatpakBinary(Option<multipak_core::launch::Binaries>),
     Running(Result<Vec<RunningInstance>, Error>),
     Details(AppDetails),
     Icons(Vec<(String, Option<PathBuf>)>),
@@ -199,7 +199,7 @@ mod tests {
         let mut w = Worker::new(egui::Context::default(), 2);
         let id = w.spawn(|ctx| {
             ctx.progress(Progress { done: 1, total: 2, current: None });
-            Output::FlatpakBinary(Some(PathBuf::from("/usr/bin/flatpak")))
+            Output::FlatpakBinary(Some(multipak_core::launch::Binaries::standard()))
         });
         let msgs = wait_for(&w, 2);
         assert!(matches!(msgs[0], Msg::Progress(i, _) if i == id));

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- One isolation method for every app: each instance's data folder is mounted over the app's own
+  `~/.var/app/<app-id>` folder in a private mount namespace (bubblewrap), so everything the app
+  stores stays in the instance, whatever the app. Instances no longer rely on
+  `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`XDG_CACHE_HOME`, `--user-data-dir` or `-profile`, which
+  many apps ignore or only partly honour. The app type now only adds the window-class and
+  side-by-side arguments.
+- Data folders of Electron, Chromium and Firefox instances created by 0.1 are moved into the
+  new layout once (Firefox profiles become the instance's default profile), and existing
+  launchers are rewritten, when Multipak starts or the instance is launched.
+
 ### Added
 
 - Hide instances, or Multipak's own window, from screenshots, screen recordings and screen

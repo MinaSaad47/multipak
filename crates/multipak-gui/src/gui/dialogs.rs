@@ -285,7 +285,7 @@ impl MultipakApp {
     fn form_dialog(&mut self, ctx: &egui::Context, form: &mut InstanceForm) -> bool {
         let details = self.details.get(&form.app_id).and_then(|d| d.ready()).cloned();
         let categories = details.as_ref().map(|d| d.categories.clone()).unwrap_or_default();
-        let eval = form.evaluate(self.mgr.paths(), &self.config.instances, self.flatpak_bin.as_deref(), &categories);
+        let eval = form.evaluate(self.mgr.paths(), &self.config.instances, self.flatpak_bin.as_ref(), &categories);
         let ids = [
             Id::unique("f-name"),
             Id::unique("f-slug"),

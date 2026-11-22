@@ -98,9 +98,10 @@ Before opening a pull request:
 1. **Test it.** Create two instances with the kind you propose, sign in to different accounts
    (or change a setting) in each, close both, start both again at the same time, and check
    that they stay separate.
-2. **Pick the right kind.** Use `electron` for Electron apps, `chromium` for browsers built on
-   Chromium that accept `--user-data-dir`, `firefox` for browsers and mail clients built on
-   Gecko that accept `-profile`, and `generic` for everything else. Only add an app if
+2. **Pick the right kind.** Isolation is the same for every kind; the kind only decides the
+   extra arguments. Use `electron` for Electron apps and `chromium` for browsers built on
+   Chromium (both get `--class`), `firefox` for browsers and mail clients built on Gecko (they
+   get `--new-instance`, `--name` and `--class`), and `generic` for everything else. Only add an app if
    automatic detection gets it wrong or cannot tell (check with `multipak apps --detect`).
 3. **Mark single-instance apps.** If a second copy only opens a window in the first one,
    set `single_instance = true` so users get a warning.

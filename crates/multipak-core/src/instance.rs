@@ -282,10 +282,9 @@ impl InstanceDraft {
                 err(Field::Env, e);
                 break;
             }
-            if strategy_owned_env(self.strategy).contains(&k.as_str()) {
+            if LOCATION_ENV.contains(&k.as_str()) {
                 warnings.push(format!(
-                    "{k} is set by the {} strategy; overriding it may make this instance share data with others.",
-                    self.strategy.label()
+                    "{k} decides where the app keeps its files; changing it may make this instance share data with others."
                 ));
             }
         }
@@ -370,14 +369,10 @@ pub fn strategy_owned_args(strategy: Strategy) -> &'static [&'static str] {
     }
 }
 
-/// Environment variables each strategy sets itself.
-pub fn strategy_owned_env(strategy: Strategy) -> &'static [&'static str] {
-    match strategy {
-        Strategy::Electron => &["XDG_CONFIG_HOME"],
-        Strategy::Generic => &["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"],
-        Strategy::Chromium | Strategy::Firefox => &[],
-    }
-}
+/// Variables that decide where an app keeps its files. Isolation gives each instance its
+/// own app folder, so pointing these elsewhere can make instances share data.
+pub const LOCATION_ENV: [&str; 6] =
+    ["HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"];
 
 /// Flatpak application IDs: at least two dot-separated parts of `[A-Za-z0-9_-]`,
 /// each not starting with a digit, at most 255 characters.

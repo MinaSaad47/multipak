@@ -173,4 +173,3 @@ kind = "firefox"
 [[app]]
 id = "org.telegram.desktop"
 kind = "generic"
-note = "Telegram keeps its data in XDG_DATA_HOME, so the generic strategy works."

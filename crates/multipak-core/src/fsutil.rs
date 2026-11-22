@@ -5,7 +5,6 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-use crate::apptype::Strategy;
 use crate::backup::CancelToken;
 use crate::error::{Error, IoContext, Result};
 use crate::paths::Paths;
@@ -54,13 +53,11 @@ const CACHE_DIR_NAMES: &[&str] = &[
 ];
 
 /// Cache folders inside an instance's data folder.
-pub fn find_cache_dirs(data_dir: &Path, strategy: Strategy) -> Vec<PathBuf> {
+pub fn find_cache_dirs(data_dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
-    if strategy == Strategy::Generic {
-        let cache = data_dir.join("cache");
-        if cache.is_dir() {
-            found.push(cache);
-        }
+    let cache = data_dir.join("cache");
+    if cache.is_dir() {
+        found.push(cache);
     }
     let mut walker = walkdir::WalkDir::new(data_dir).min_depth(1).max_depth(5).follow_links(false).into_iter();
     while let Some(entry) = walker.next() {
@@ -171,7 +168,7 @@ mod tests {
         fs::create_dir_all(d.join("Slack/Code Cache/js")).unwrap();
         fs::create_dir_all(d.join("Slack/Local Storage")).unwrap();
         fs::write(d.join("Slack/Local Storage/keep"), "keep").unwrap();
-        let mut found = find_cache_dirs(d, Strategy::Electron);
+        let mut found = find_cache_dirs(d);
         found.sort();
         assert_eq!(found, vec![d.join("Slack/Cache"), d.join("Slack/Code Cache")]);
         let freed = clear_dir_contents(&d.join("Slack/Cache"), &CancelToken::new()).unwrap();
@@ -181,7 +178,7 @@ mod tests {
         assert!(d.join("Slack/Local Storage/keep").exists());
 
         fs::create_dir_all(d.join("cache/fontconfig")).unwrap();
-        assert!(find_cache_dirs(d, Strategy::Generic).contains(&d.join("cache")));
+        assert!(find_cache_dirs(d).contains(&d.join("cache")));
     }
 
     #[test]

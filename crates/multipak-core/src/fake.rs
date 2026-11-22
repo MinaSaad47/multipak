@@ -50,6 +50,7 @@ impl FakeHost {
     pub fn new() -> Self {
         let host = Self::default();
         host.add_executable("flatpak", "/usr/bin/flatpak");
+        host.add_executable("bwrap", "/usr/bin/bwrap");
         host.add_executable("update-desktop-database", "/usr/bin/update-desktop-database");
         host
     }

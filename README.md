@@ -44,17 +44,30 @@ Edit / More buttons.
 
 ## How it works
 
-A Flatpak app keeps its data in `~/.var/app/<app-id>/`. Multipak gives each instance its own
-folder, by default `~/.var/app/<app-id>/instances/<short-name>/`. The sandbox can already reach
-that folder, so no extra permissions are needed. It then starts the app so that it uses that
-folder:
+A Flatpak app keeps everything it stores (settings, data, cache, state, profiles, lock files)
+in its app folder, `~/.var/app/<app-id>/`. Multipak gives each instance its own folder, by
+default `~/.var/app/<app-id>/instances/<short-name>/`, and starts the app with that folder
+**mounted over its app folder**:
 
-| App type | How the instance is started |
+```sh
+bwrap --dev-bind / / --bind <instance-folder> ~/.var/app/<app-id> -- flatpak run <app-id> …
+```
+
+bubblewrap (which Flatpak itself uses, so it is already installed) creates a private,
+unprivileged mount namespace in which only that one folder is replaced; everything else on the
+system stays the same. Flatpak then hands the sandbox "its" app folder as usual, so the app
+writes into the instance folder without knowing it. This works the same way for every app:
+no environment variables or app-specific profile flags are involved, and the app's normal copy
+keeps using its real folder.
+
+The app type only adds what lets copies run side by side with their own window:
+
+| App type | Extra arguments |
 | --- | --- |
-| **Electron** (Slack, Discord, Obsidian, Signal, …) | `flatpak run --env=XDG_CONFIG_HOME=<dir> <app-id> --class=<wmclass>` |
-| **Chromium-based** (Chrome, Chromium, Brave, Edge, Vivaldi) | `flatpak run <app-id> --user-data-dir=<dir> --class=<wmclass>` |
-| **Firefox-based** (Firefox, LibreWolf, Floorp, Zen, Thunderbird) | Profile created once with `-CreateProfile "<name> <dir>"`, then `flatpak run <app-id> -profile <dir> --new-instance --name=<wmclass> --class=<wmclass>` |
-| **Generic** (anything else) | `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` point at `config/`, `data/` and `cache/` inside the instance folder |
+| **Electron** (Slack, Discord, Obsidian, Signal, …) | `--class=<wmclass>` |
+| **Chromium-based** (Chrome, Chromium, Brave, Edge, Vivaldi) | `--class=<wmclass>` |
+| **Firefox-based** (Firefox, LibreWolf, Floorp, Zen, Thunderbird) | `--new-instance --name=<wmclass> --class=<wmclass>` |
+| **Generic** (anything else) | none |
 
 Every launch also sets `MULTIPAK_INSTANCE=<app-id>/<short-name>` inside the sandbox, which is
 how Multipak tells which instance a running `flatpak ps` entry belongs to.
@@ -301,7 +314,7 @@ as `instances.toml.v<N>.bak`). Files from newer versions are refused rather than
 ## Known limitations
 
 - **Apps that allow only one running copy.** Many GTK/GApplication and some KDE apps register a
-  unique D-Bus name. Changing their data folders does not change that name, so starting a
+  unique D-Bus name. A separate app folder does not change that name, so starting a
   second copy just opens a new window in the first one. Multipak warns about this when it can
   tell (D-Bus activatable apps, GNOME and KDE runtimes, entries marked in the app table), but
   it cannot work around it. Electron, Chromium and Firefox apps are not affected: their
@@ -311,10 +324,6 @@ as `instances.toml.v<N>.bak`). Files from newer versions are refused rather than
   the dock may group an instance with the normal app even though it runs separately.
   The generic type does not set a window class at all; add `--class=…` as an extra argument if
   the app supports it.
-- **Firefox profiles.** If an app has never been started, the first profile created with
-  `-CreateProfile` becomes its default profile. Start the app normally once before creating
-  instances if you want to keep a separate default profile. Deleting an instance leaves its
-  entry in the app's `profiles.ini` (the browser ignores entries whose folder is gone).
 - **Hiding from screen capture** needs KDE Plasma 6. GNOME, Sway and other compositors offer no
   way to exclude a window from capture. Windows are hidden a moment after they open (once the
   helper has answered), so a capture that is already running may record the first frame.
@@ -366,7 +375,7 @@ AccessKit (screen reader support) stays enabled.
 
 ## Why Multipak is not a Flatpak
 
-Multipak has to run the host's `flatpak` command (`flatpak run`, `ps`, `kill`, `override`),
+Multipak has to run the host's `flatpak` and `bwrap` commands (`flatpak run`, `ps`, `kill`, `override`),
 read `/proc` of sandboxed processes, and write launchers into `~/.local/share/applications`,
 `~/.config/autostart` and the Flatpak overrides folder. Inside a Flatpak sandbox, all of that
 would need `flatpak-spawn --host` plus broad filesystem access, which would defeat the

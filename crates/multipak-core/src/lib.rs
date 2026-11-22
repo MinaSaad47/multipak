@@ -25,6 +25,7 @@ pub mod icons;
 pub mod instance;
 pub mod keyfile;
 pub mod launch;
+pub mod layout;
 pub mod manager;
 pub mod paths;
 pub mod transfer;
