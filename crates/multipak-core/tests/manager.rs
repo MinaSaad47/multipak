@@ -82,7 +82,7 @@ fn key(slug: &str) -> InstanceKey {
 #[test]
 fn create_writes_launcher_and_data_dir() {
     let env = setup();
-    let out = env.mgr.create(&slack("Work", &env), false).unwrap();
+    let out = env.mgr.create(&slack("Work", &env)).unwrap();
     assert!(out.warnings.is_empty(), "{:?}", out.warnings);
     let paths = env.mgr.paths();
     let data = env.home.join(".var/app/com.slack.Slack/instances/work");
@@ -120,7 +120,7 @@ fn create_writes_launcher_and_data_dir() {
     );
     let cfg = env.mgr.load().unwrap();
     assert_eq!(cfg.instances.len(), 1);
-    assert!(matches!(env.mgr.create(&slack("x", &env).clone_with_slug("work"), false), Err(Error::Invalid { .. })));
+    assert!(matches!(env.mgr.create(&slack("x", &env).clone_with_slug("work")), Err(Error::Invalid { .. })));
 }
 
 trait WithSlug {
@@ -138,51 +138,62 @@ impl WithSlug for InstanceDraft {
 fn update_database_is_optional() {
     let env = setup();
     env.host.remove_executable("update-desktop-database");
-    env.mgr.create(&slack("Work", &env), false).unwrap();
+    env.mgr.create(&slack("Work", &env)).unwrap();
     assert!(env.host.calls().iter().all(|c| !c.program.contains("update-desktop-database")));
 }
 
 #[test]
-fn custom_dir_requires_consent_and_is_cleaned_up() {
+fn custom_dir_is_mounted_without_extra_permissions() {
     let env = setup();
     let custom = env.home.join("Clients/acme");
     let mut d = slack("Acme", &env);
     d.data_dir = Some(custom.clone());
-    let err = env.mgr.create(&d, false).unwrap_err();
-    assert!(matches!(err, Error::OverrideRequired { .. }), "{err}");
-    assert!(env.mgr.load().unwrap().instances.is_empty());
-    assert!(!env.mgr.paths().desktop_file("com.slack.Slack", "acme").exists());
-
-    let inst = env.mgr.create(&d, true).unwrap().instance;
-    assert_eq!(inst.managed_override.as_deref(), Some(custom.to_str().unwrap()));
-    let overrides = env.mgr.paths().overrides_file("com.slack.Slack");
-    assert!(fs::read_to_string(&overrides).unwrap().contains(custom.to_str().unwrap()));
-
-    let report = env.mgr.delete(&inst.key(), false).unwrap();
-    assert_eq!(report.removed_override.as_deref(), custom.to_str());
-    assert!(!fs::read_to_string(&overrides).unwrap().contains(custom.to_str().unwrap()));
-    assert!(custom.is_dir(), "data is kept by default");
+    let inst = env.mgr.create(&d).unwrap().instance;
+    assert_eq!(inst.managed_override, None);
+    assert!(custom.is_dir());
+    assert!(!env.mgr.paths().overrides_file("com.slack.Slack").exists());
+    assert!(env.host.calls_matching(&["override"]).is_empty());
+    env.mgr.launch(&inst.key()).unwrap();
+    let spec = env.host.launches().pop().unwrap();
+    let app_dir = env.mgr.paths().app_var_dir("com.slack.Slack");
+    assert_eq!(spec.args[3..6], ["--bind".to_string(), custom.display().to_string(), app_dir.display().to_string()]);
 }
 
 #[test]
-fn existing_override_is_not_claimed() {
+fn old_folder_access_is_removed() {
     let env = setup();
     let custom = env.home.join("Shared/slack");
-    let overrides = env.mgr.paths().overrides_file("com.slack.Slack");
-    fs::create_dir_all(overrides.parent().unwrap()).unwrap();
-    fs::write(&overrides, format!("[Context]\nfilesystems={};\n", custom.display())).unwrap();
     let mut d = slack("Shared", &env);
     d.data_dir = Some(custom.clone());
-    let inst = env.mgr.create(&d, false).unwrap().instance;
-    assert_eq!(inst.managed_override, None);
-    env.mgr.delete(&inst.key(), false).unwrap();
-    assert!(fs::read_to_string(&overrides).unwrap().contains(custom.to_str().unwrap()), "user's override untouched");
+    let inst = env.mgr.create(&d).unwrap().instance;
+    // What Multipak 0.1 left behind: a granted override, recorded on the instance, next to
+    // one the user added themselves.
+    let overrides = env.mgr.paths().overrides_file("com.slack.Slack");
+    fs::create_dir_all(overrides.parent().unwrap()).unwrap();
+    fs::write(&overrides, format!("[Context]\nfilesystems={};/srv/mine;\n", custom.display())).unwrap();
+    let store = multipak_core::ConfigStore::new(env.mgr.paths().config_file());
+    store
+        .update(|c| {
+            c.get_mut(&inst.key()).unwrap().managed_override = Some(custom.display().to_string());
+            Ok(())
+        })
+        .unwrap();
+    let issues = env.mgr.doctor().unwrap();
+    assert!(
+        issues.iter().any(|i| i.kind == IssueKind::OldOverride && i.fix == Some(Fix::RemoveOldOverride(inst.key())))
+    );
+
+    env.mgr.upgrade().unwrap();
+    let text = fs::read_to_string(&overrides).unwrap();
+    assert!(!text.contains(custom.to_str().unwrap()) && text.contains("/srv/mine"), "{text}");
+    assert_eq!(env.mgr.load().unwrap().get(&inst.key()).unwrap().managed_override, None);
+    assert!(!env.mgr.doctor().unwrap().iter().any(|i| i.kind == IssueKind::OldOverride));
 }
 
 #[test]
 fn delete_data_is_guarded() {
     let env = setup();
-    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let inst = env.mgr.create(&slack("Work", &env)).unwrap().instance;
     let data = inst.resolved_data_dir(env.mgr.paths());
     fs::write(data.join("file"), "x").unwrap();
     let report = env.mgr.delete(&inst.key(), true).unwrap();
@@ -195,7 +206,7 @@ fn delete_data_is_guarded() {
 #[test]
 fn launch_builds_command_and_reports_failures() {
     let env = setup();
-    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let inst = env.mgr.create(&slack("Work", &env)).unwrap().instance;
     assert!(matches!(env.mgr.launch(&inst.key()).unwrap(), LaunchOutcome::Running { .. }));
     let spec = env.host.launches().pop().unwrap();
     assert_eq!(spec.program, "/usr/bin/bwrap");
@@ -213,7 +224,7 @@ fn launch_builds_command_and_reports_failures() {
 fn firefox_uses_its_default_profile_inside_the_instance() {
     let env = setup();
     let d = InstanceDraft::new("org.mozilla.firefox", "Firefox", "Client A", Strategy::Firefox, &[]);
-    let inst = env.mgr.create(&d, false).unwrap().instance;
+    let inst = env.mgr.create(&d).unwrap().instance;
     env.mgr.launch(&inst.key()).unwrap();
     let spec = env.host.launches().pop().unwrap();
     assert!(!spec.args.iter().any(|a| a.contains("profile")), "{:?}", spec.args);
@@ -223,7 +234,7 @@ fn firefox_uses_its_default_profile_inside_the_instance() {
 #[test]
 fn launch_moves_old_data_into_place_once() {
     let env = setup();
-    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let inst = env.mgr.create(&slack("Work", &env)).unwrap().instance;
     let dir = inst.resolved_data_dir(env.mgr.paths());
     // A data folder written by Multipak 0.1, where it was Slack's XDG_CONFIG_HOME.
     fs::remove_file(dir.join(multipak_core::layout::MARKER)).unwrap();
@@ -238,8 +249,8 @@ fn launch_moves_old_data_into_place_once() {
 #[test]
 fn running_detection_and_stop() {
     let env = setup();
-    let work = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
-    let home = env.mgr.create(&slack("Home", &env), false).unwrap().instance;
+    let work = env.mgr.create(&slack("Work", &env)).unwrap().instance;
+    let home = env.mgr.create(&slack("Home", &env)).unwrap().instance;
     env.host.on(
         "flatpak",
         &["ps"],
@@ -282,12 +293,12 @@ fn running_detection_and_stop() {
 #[test]
 fn update_and_duplicate() {
     let env = setup();
-    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let inst = env.mgr.create(&slack("Work", &env)).unwrap().instance;
     let mut d = inst.to_draft();
     d.name = "Work Team".into();
     d.autostart = true;
     d.badge = Some(Badge { color: "#e01b24".into(), letter: Some("W".into()) });
-    let updated = env.mgr.update(&inst.key(), &d, false).unwrap().instance;
+    let updated = env.mgr.update(&inst.key(), &d).unwrap().instance;
     assert_eq!(updated.created, inst.created);
     let paths = env.mgr.paths();
     let autostart = paths.autostart_file("com.slack.Slack", "work");
@@ -300,13 +311,13 @@ fn update_and_duplicate() {
 
     d.autostart = false;
     d.badge = None;
-    env.mgr.update(&inst.key(), &d, false).unwrap();
+    env.mgr.update(&inst.key(), &d).unwrap();
     assert!(!autostart.exists());
     assert!(!badge.exists());
 
     let mut bad = d.clone();
     bad.slug = "other".into();
-    assert!(env.mgr.update(&inst.key(), &bad, false).is_err());
+    assert!(env.mgr.update(&inst.key(), &bad).is_err());
 
     let dup = env.mgr.duplicate(&inst.key(), "Work").unwrap().instance;
     assert_eq!(dup.slug, "work-2");
@@ -317,7 +328,7 @@ fn update_and_duplicate() {
 #[test]
 fn doctor_finds_and_fixes_problems() {
     let env = setup();
-    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let inst = env.mgr.create(&slack("Work", &env)).unwrap().instance;
     assert!(env.mgr.doctor().unwrap().is_empty(), "{:?}", env.mgr.doctor().unwrap());
     let paths = env.mgr.paths();
     let desktop = paths.desktop_file("com.slack.Slack", "work");
@@ -361,7 +372,7 @@ fn doctor_finds_and_fixes_problems() {
 #[test]
 fn backup_restore_and_clear_cache() {
     let env = setup();
-    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let inst = env.mgr.create(&slack("Work", &env)).unwrap().instance;
     let data = inst.resolved_data_dir(env.mgr.paths());
     fs::create_dir_all(data.join("config/Slack/Cache")).unwrap();
     fs::write(data.join("config/Slack/Cache/blob"), vec![0u8; 50_000]).unwrap();
@@ -380,20 +391,13 @@ fn backup_restore_and_clear_cache() {
     env.mgr.restore(&archive, RestoreTarget::Existing(inst.key()), &|_| {}, &cancel).unwrap();
     assert!(data.join("config/Slack/Cache/blob").exists());
 
-    let copy = env
-        .mgr
-        .restore(
-            &archive,
-            RestoreTarget::New { slug: Some("work-copy".into()), allow_override: false },
-            &|_| {},
-            &cancel,
-        )
-        .unwrap();
+    let copy =
+        env.mgr.restore(&archive, RestoreTarget::New { slug: Some("work-copy".into()) }, &|_| {}, &cancel).unwrap();
     assert_eq!(copy.slug, "work-copy");
     assert_eq!(copy.name, "Work (copy)");
     assert!(copy.resolved_data_dir(env.mgr.paths()).join("config/Slack/settings.json").exists());
     assert!(matches!(
-        env.mgr.restore(&archive, RestoreTarget::New { slug: None, allow_override: false }, &|_| {}, &cancel),
+        env.mgr.restore(&archive, RestoreTarget::New { slug: None }, &|_| {}, &cancel),
         Err(Error::DuplicateSlug { .. })
     ));
 }
@@ -401,11 +405,11 @@ fn backup_restore_and_clear_cache() {
 #[test]
 fn export_and_import_to_another_machine() {
     let env = setup();
-    let inst = env.mgr.create(&slack("Work", &env), false).unwrap().instance;
+    let inst = env.mgr.create(&slack("Work", &env)).unwrap().instance;
     fs::write(inst.resolved_data_dir(env.mgr.paths()).join("token"), "secret").unwrap();
     let mut d = slack("Client", &env);
     d.data_dir = Some(env.home.join("Clients/one"));
-    env.mgr.create(&d, true).unwrap();
+    env.mgr.create(&d).unwrap();
 
     let export = env.home.join("exports/setup.json");
     let report = env.mgr.export(&export, true, &|_| {}, &CancelToken::new()).unwrap();
@@ -429,31 +433,37 @@ fn export_and_import_to_another_machine() {
         fs::copy(e.path(), target_data.join(e.file_name())).unwrap();
     }
 
-    // Without consent the custom-folder instance is skipped, the other is created.
+    // Both instances are created; custom folders need no extra permission.
     let r = env2
         .mgr
         .import(&moved, ImportOptions { restore_data: true, ..Default::default() }, &|_| {}, &CancelToken::new())
         .unwrap();
-    assert_eq!(r.created, vec![key("work")]);
-    assert_eq!(r.restored, vec![key("work")]);
-    assert_eq!(r.skipped.len(), 1);
+    let mut created = r.created.clone();
+    created.sort();
+    assert_eq!(created, vec![key("client"), key("work")]);
+    let mut restored = r.restored.clone();
+    restored.sort();
+    assert_eq!(restored, vec![key("client"), key("work")]);
+    assert!(r.skipped.is_empty());
     assert_eq!(fs::read_to_string(home2.join(".var/app/com.slack.Slack/instances/work/token")).unwrap(), "secret");
 
     let r = env2
         .mgr
         .import(
             &moved,
-            ImportOptions { on_conflict: OnConflict::Rename, allow_overrides: true, restore_data: false },
+            ImportOptions { on_conflict: OnConflict::Rename, restore_data: false },
             &|_| {},
             &CancelToken::new(),
         )
         .unwrap();
     let mut created = r.created.clone();
     created.sort();
-    assert_eq!(created, vec![key("client"), key("work-2")]);
+    // A renamed copy of `client` would share its custom data folder, so it is skipped.
+    assert_eq!(created, vec![key("work-2")]);
+    assert_eq!(r.skipped.len(), 1);
     let client = env2.mgr.load().unwrap().find("com.slack.Slack/client").unwrap().clone();
     assert_eq!(client.data_dir.as_deref(), Some(home2.join("Clients/one").as_path()));
-    assert!(client.managed_override.is_some());
+    assert_eq!(client.managed_override, None);
 }
 
 #[test]
@@ -472,13 +482,13 @@ fn hide_from_capture_installs_per_process_helper() {
 
     let mut d = slack("Work", &env);
     d.hide_from_capture = true;
-    let inst = env.mgr.create(&d, false).unwrap().instance;
+    let inst = env.mgr.create(&d).unwrap().instance;
     assert!(capture::helper_installed(&paths, &exe), "script, service file and plugin switch");
     assert_eq!(fs::read_to_string(&rules).unwrap(), user_rules);
     assert!(env.mgr.doctor().unwrap().is_empty(), "{:?}", env.mgr.doctor().unwrap());
 
     // The helper answers per process, so two instances of the same app are told apart.
-    let other = env.mgr.create(&slack("Home", &env), false).unwrap().instance;
+    let other = env.mgr.create(&slack("Home", &env)).unwrap().instance;
     env.host.add_process(
         500,
         FakeProcess { environ: vec![format!("MULTIPAK_INSTANCE={}", inst.key())], ..Default::default() },
@@ -505,12 +515,12 @@ fn hide_from_capture_installs_per_process_helper() {
     // Turning the last one off removes everything again.
     let mut off = inst.to_draft();
     off.hide_from_capture = false;
-    env.mgr.update(&inst.key(), &off, false).unwrap();
+    env.mgr.update(&inst.key(), &off).unwrap();
     assert!(!capture::helper_present(&paths));
 
     let mut on = inst.to_draft();
     on.hide_from_capture = true;
-    env.mgr.update(&inst.key(), &on, false).unwrap();
+    env.mgr.update(&inst.key(), &on).unwrap();
     assert!(capture::helper_installed(&paths, &exe));
     env.mgr.delete(&inst.key(), false).unwrap();
     assert!(!capture::helper_present(&paths));
@@ -535,7 +545,7 @@ fn hide_from_capture_warns_on_unsupported_desktops() {
     env.mgr.set_capture_support(multipak_core::capture::Support::Unsupported("GNOME".into()));
     let mut d = slack("Work", &env);
     d.hide_from_capture = true;
-    let out = env.mgr.create(&d, false).unwrap();
+    let out = env.mgr.create(&d).unwrap();
     assert!(out.warnings.iter().any(|w| w.contains("GNOME")), "{:?}", out.warnings);
 }
 
@@ -551,7 +561,7 @@ fn concurrent_creates_do_not_lose_instances() {
                     InstanceDraft::new("com.slack.Slack", "Slack", &format!("Account {n}"), Strategy::Electron, &[]);
                 d.slug = format!("account-{n}");
                 d.wm_class = format!("multipak-slack-account-{n}");
-                mgr.create(&d, false).unwrap();
+                mgr.create(&d).unwrap();
             })
         })
         .collect();

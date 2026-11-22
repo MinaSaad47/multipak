@@ -180,7 +180,7 @@ impl MultipakApp {
                     _ => true,
                 }
             }
-            Dialog::Import { path, file, opts, custom_dirs } => {
+            Dialog::Import { path, file, opts } => {
                 let has_backups = file.instances.iter().any(|e| e.backup.is_some());
                 let (out, esc) = modal(ctx, "import", 500.0, |ui| {
                     ui.heading("Import setup");
@@ -197,21 +197,6 @@ impl MultipakApp {
                     ui.radio_value(&mut opts.on_conflict, OnConflict::Rename, "Import it under a new short name");
                     if has_backups {
                         ui.checkbox(&mut opts.restore_data, "Restore included data backups");
-                    }
-                    if !custom_dirs.is_empty() {
-                        ui.add_space(4.0);
-                        warning_box(
-                            ui,
-                            false,
-                            "Some instances use custom data folders. The apps need permission to reach them:",
-                        );
-                        for d in custom_dirs.iter() {
-                            ui.monospace(format!("flatpak override --user --filesystem={d} …"));
-                        }
-                        ui.checkbox(&mut opts.allow_overrides, "Allow Multipak to grant this folder access");
-                        if !opts.allow_overrides {
-                            ui.weak("Without permission, those instances are skipped.");
-                        }
                     }
                     let mut out = dialog_buttons(ui, "Import", true, false, false);
                     if out == Outcome::Keep && enter_submits(ui.ctx(), &[]) {
@@ -496,23 +481,6 @@ impl MultipakApp {
 
                 for w in &eval.warnings {
                     warning_box(ui, false, w);
-                }
-                if let Some(dir) = &eval.needs_override {
-                    ui.add_space(4.0);
-                    egui::Frame::new()
-                        .stroke(egui::Stroke::new(1.0, ui.visuals().warn_fg_color))
-                        .corner_radius(8)
-                        .inner_margin(Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.label(RichText::new("Folder access needed").strong());
-                            ui.label(format!("{} is outside the app's sandbox. Multipak will run:", dir));
-                            if let Some(cmd) = eval.preview.as_ref().and_then(|p| p.override_command.as_ref()) {
-                                ui.monospace(cmd);
-                            }
-                            ui.label("Multipak removes this permission again when you delete the instance.");
-                            ui.checkbox(&mut form.allow_override, "Allow this change");
-                        });
                 }
                 if let Some(p) = &eval.preview {
                     ui.add_space(4.0);

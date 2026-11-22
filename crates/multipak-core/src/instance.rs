@@ -86,7 +86,8 @@ pub struct Instance {
     /// (KDE Plasma; see [`crate::capture`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hide_from_capture: bool,
-    /// A `--filesystem` override Multipak added for this instance (removed on delete).
+    /// A `--filesystem` override Multipak 0.1 added for a custom data folder. No longer
+    /// needed (the data folder is mounted into the sandbox); removed by [`crate::Manager::upgrade`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_override: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
@@ -193,9 +194,6 @@ pub struct DraftContext<'a> {
 pub struct ValidatedDraft {
     pub instance: Instance,
     pub data_dir: PathBuf,
-    /// The `--filesystem` value that must be granted, if the data folder is outside the
-    /// app's own `~/.var/app/<app-id>` folder.
-    pub needs_override: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -310,7 +308,6 @@ impl InstanceDraft {
             },
             None => ctx.paths.default_instance_dir(&self.app_id, &self.slug),
         };
-        let mut needs_override = None;
         if !data_dir.as_os_str().is_empty() {
             if let Err(e) = check_data_dir_location(ctx.paths, &self.app_id, &data_dir) {
                 err(Field::DataDir, e);
@@ -324,8 +321,6 @@ impl InstanceDraft {
                         format!("this folder overlaps the data folder of {}", other.display_name()),
                     ),
                 );
-            } else if !crate::flatpak::is_inside_app_dir(ctx.paths, &self.app_id, &data_dir) {
-                needs_override = data_dir.to_str().map(str::to_string);
             }
         }
 
@@ -353,7 +348,6 @@ impl InstanceDraft {
                 created: OffsetDateTime::now_utc(),
             },
             data_dir,
-            needs_override,
             warnings,
         })
     }
@@ -682,20 +676,14 @@ mod tests {
         let v = validated(&draft("Work"), &[]).unwrap();
         assert_eq!(v.data_dir, PathBuf::from("/home/u/.var/app/com.slack.Slack/instances/work"));
         assert_eq!(v.instance.data_dir, None);
-        assert_eq!(v.needs_override, None);
         assert_eq!(v.instance.wm_class, "multipak-slack-work");
     }
 
     #[test]
-    fn custom_dir_outside_app_folder_needs_override() {
+    fn custom_dir_is_normalized() {
         let mut d = draft("Work");
         d.data_dir = Some(PathBuf::from("/home/u/Clients/acme/./slack/"));
-        let v = validated(&d, &[]).unwrap();
-        assert_eq!(v.data_dir, PathBuf::from("/home/u/Clients/acme/slack"));
-        assert_eq!(v.needs_override.as_deref(), Some("/home/u/Clients/acme/slack"));
-
-        d.data_dir = Some(PathBuf::from("/home/u/.var/app/com.slack.Slack/custom"));
-        assert_eq!(validated(&d, &[]).unwrap().needs_override, None);
+        assert_eq!(validated(&d, &[]).unwrap().data_dir, PathBuf::from("/home/u/Clients/acme/slack"));
     }
 
     #[test]

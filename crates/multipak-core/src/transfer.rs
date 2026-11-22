@@ -58,8 +58,6 @@ pub enum OnConflict {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ImportOptions {
     pub on_conflict: OnConflict,
-    /// Consent to run `flatpak override` for imported custom data folders.
-    pub allow_overrides: bool,
     /// Restore included data backups.
     pub restore_data: bool,
 }
@@ -207,7 +205,7 @@ impl Manager {
                     draft.app_id, draft.name
                 ));
             }
-            let created = match self.create(&draft, opts.allow_overrides) {
+            let created = match self.create(&draft) {
                 Ok(o) => {
                     report.warnings.extend(o.warnings);
                     o.instance

@@ -1,6 +1,6 @@
 //! Queries and actions on the host's Flatpak installation, all through [`Host`].
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::error::{Error, IoContext, Result};
@@ -161,11 +161,6 @@ impl<'a> Flatpak<'a> {
         let spec = Self::spec(&["info", "--show-ref", app_id]);
         Ok(self.host.run(&spec)?.success())
     }
-
-    /// Adds `--filesystem=<dir>` to the app's per-user overrides.
-    pub fn add_filesystem_override(&self, app_id: &str, dir: &str) -> Result<()> {
-        self.query(&["override", "--user", &format!("--filesystem={dir}"), app_id]).map(|_| ())
-    }
 }
 
 fn filesystem_entry_matches(entry: &str, dir: &str) -> bool {
@@ -178,6 +173,7 @@ fn filesystem_entry_matches(entry: &str, dir: &str) -> bool {
 }
 
 /// Whether the per-user override file of `app_id` already grants `dir`.
+#[cfg(test)]
 pub fn override_has_filesystem(paths: &Paths, app_id: &str, dir: &str) -> bool {
     let Ok(text) = std::fs::read_to_string(paths.overrides_file(app_id)) else {
         return false;
@@ -213,11 +209,6 @@ pub fn remove_filesystem_override(paths: &Paths, app_id: &str, dir: &str) -> Res
     }
     crate::atomic::write_atomic(&file, kf.to_text().as_bytes(), 0o644)?;
     Ok(true)
-}
-
-/// Whether a path is inside the folder the sandbox of `app_id` can always reach.
-pub fn is_inside_app_dir(paths: &Paths, app_id: &str, dir: &Path) -> bool {
-    dir.starts_with(paths.app_var_dir(app_id))
 }
 
 #[cfg(test)]

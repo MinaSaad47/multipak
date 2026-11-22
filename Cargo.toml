@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/multipak-core", "crates/multipak-gui"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
@@ -11,7 +11,7 @@ repository = "https://github.com/MinaSaad47/multipak"
 authors = ["Multipak contributors"]
 
 [workspace.dependencies]
-multipak-core = { path = "crates/multipak-core", version = "0.1.0" }
+multipak-core = { path = "crates/multipak-core", version = "0.2.0" }
 
 anyhow = "1.0.104"
 ctrlc = "3.5.3"

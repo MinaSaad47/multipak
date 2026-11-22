@@ -75,15 +75,14 @@ pub enum RestoreTarget {
     /// Replace the data of an existing instance.
     Existing(InstanceKey),
     /// Create a new instance from the backup's settings, optionally with another slug.
-    New { slug: Option<String>, allow_override: bool },
+    New { slug: Option<String> },
 }
 
-/// The launch command, launcher text and override (if any) a draft would produce.
+/// The launch command and launcher text a draft would produce.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preview {
     pub command: String,
     pub desktop_file: String,
-    pub override_command: Option<String>,
 }
 
 /// The icon value written into a launcher: the badge PNG path or the app's icon name.
@@ -114,15 +113,7 @@ pub fn preview(paths: &Paths, validated: &ValidatedDraft, bins: &Binaries, categ
     Preview {
         command: launch::launch_spec(bins, paths, inst).display(),
         desktop_file: launcher_text(paths, inst, bins, categories, false),
-        override_command: validated.needs_override.as_ref().map(|dir| override_command(&inst.app_id, dir)),
     }
-}
-
-/// The exact override command Multipak runs for a custom data folder.
-pub fn override_command(app_id: &str, dir: &str) -> String {
-    CommandSpec::new("flatpak")
-        .args(["override".to_string(), "--user".to_string(), format!("--filesystem={dir}"), app_id.to_string()])
-        .display()
 }
 
 /// Reads the categories from an app's exported launcher.
@@ -222,6 +213,11 @@ impl Manager {
         let bins = self.binaries()?;
         let mut warnings = Vec::new();
         for inst in &config.instances {
+            if inst.managed_override.is_some()
+                && let Err(e) = self.remove_old_override(&inst.key())
+            {
+                warnings.push(format!("Could not remove the old folder access of {}: {e}", inst.display_name()));
+            }
             match layout::migrate(&self.paths, inst) {
                 Ok(layout::Outcome::Pending(message)) => warnings.push(message),
                 Ok(_) => {}
@@ -276,18 +272,18 @@ impl Manager {
         config.get(key).cloned().ok_or_else(|| Error::InstanceNotFound(key.to_string()))
     }
 
-    /// Grants the sandbox access to a custom data folder. Returns the override value if
-    /// Multipak added it (so it can be removed later), `None` if it already existed.
-    fn grant_access(&self, app_id: &str, dir: &str, allow: bool) -> Result<Option<String>> {
-        if flatpak::override_has_filesystem(&self.paths, app_id, dir) {
-            return Ok(None);
-        }
-        if !allow {
-            return Err(Error::OverrideRequired { app_id: app_id.to_string(), dir: PathBuf::from(dir) });
-        }
-        tracing::info!("adding filesystem override {dir} for {app_id}");
-        self.flatpak().add_filesystem_override(app_id, dir)?;
-        Ok(Some(dir.to_string()))
+    /// Removes the `--filesystem` override Multipak 0.1 added for a custom data folder. The
+    /// data folder is mounted into the sandbox now, so the extra access is not needed.
+    pub fn remove_old_override(&self, key: &InstanceKey) -> Result<()> {
+        let config = self.load()?;
+        let Some(dir) = self.find(&config, key)?.managed_override else { return Ok(()) };
+        self.revoke_access(&key.app_id, &dir)?;
+        self.store.update(|c| {
+            if let Some(slot) = c.get_mut(key) {
+                slot.managed_override = None;
+            }
+            Ok(())
+        })
     }
 
     fn revoke_access(&self, app_id: &str, dir: &str) -> Result<bool> {
@@ -453,20 +449,13 @@ impl Manager {
     }
 
     /// Creates an instance: data folder, optional override, launchers and config entry.
-    /// `allow_override` is the user's consent to run `flatpak override` for a custom folder.
-    pub fn create(&self, draft: &InstanceDraft, allow_override: bool) -> Result<SaveOutcome> {
+    pub fn create(&self, draft: &InstanceDraft) -> Result<SaveOutcome> {
         let config = self.load()?;
         let v = validate_against(&self.paths, &config, draft, None)?;
-        let mut instance = v.instance;
+        let instance = v.instance;
         let mut warnings = v.warnings;
-        if let Some(dir) = &v.needs_override {
-            instance.managed_override = self.grant_access(&instance.app_id, dir, allow_override)?;
-        }
         let rollback = |inst: &Instance| {
             let _ = self.remove_launchers(inst);
-            if let Some(dir) = &inst.managed_override {
-                let _ = self.revoke_access(&inst.app_id, dir);
-            }
         };
         let result = (|| {
             warnings.extend(self.prepare_data_dir(&instance)?);
@@ -490,7 +479,7 @@ impl Manager {
     }
 
     /// Saves changes to an existing instance. The app and short name cannot change.
-    pub fn update(&self, key: &InstanceKey, draft: &InstanceDraft, allow_override: bool) -> Result<SaveOutcome> {
+    pub fn update(&self, key: &InstanceKey, draft: &InstanceDraft) -> Result<SaveOutcome> {
         if draft.app_id != key.app_id || draft.slug != key.slug {
             return Err(Error::invalid(
                 "short name",
@@ -505,14 +494,6 @@ impl Manager {
         instance.created = old.created;
         let old_dir = old.resolved_data_dir(&self.paths);
         let dir_changed = old_dir != v.data_dir;
-        instance.managed_override = if dir_changed {
-            match &v.needs_override {
-                Some(dir) => self.grant_access(&instance.app_id, dir, allow_override)?,
-                None => None,
-            }
-        } else {
-            old.managed_override.clone()
-        };
         if dir_changed {
             warnings.push(format!("The data folder changed. Existing data in {} was not moved.", old_dir.display()));
         }
@@ -523,7 +504,7 @@ impl Manager {
             *slot = instance.clone();
             Ok(())
         })?;
-        if dir_changed && let Some(dir) = &old.managed_override {
+        if let Some(dir) = &old.managed_override {
             self.revoke_access(&old.app_id, dir)?;
         }
         if old.hide_from_capture != instance.hide_from_capture {
@@ -547,7 +528,7 @@ impl Manager {
         {
             b.letter = new_name.trim().chars().next().map(|c| c.to_uppercase().to_string());
         }
-        self.create(&draft, false)
+        self.create(&draft)
     }
 
     /// Removes an instance: launchers, autostart entry, badge icon and the override
@@ -602,12 +583,6 @@ impl Manager {
         let bins = self.binaries()?;
         for w in self.prepare_data_dir(&instance)? {
             tracing::warn!("{w}");
-        }
-        if let Some(dir) = &instance.managed_override
-            && !flatpak::override_has_filesystem(&self.paths, &instance.app_id, dir)
-        {
-            tracing::warn!("override for {dir} disappeared; adding it again");
-            self.flatpak().add_filesystem_override(&instance.app_id, dir)?;
         }
         let spec = launch::launch_spec(&bins, &self.paths, &instance);
         let log = self.paths.launch_log(&instance.app_id, &instance.slug);
@@ -726,7 +701,7 @@ impl Manager {
                 }
                 instance
             }
-            RestoreTarget::New { slug, allow_override } => {
+            RestoreTarget::New { slug } => {
                 let config = self.load()?;
                 let mut draft = manifest.instance.to_draft();
                 if let Some(slug) = slug {
@@ -743,7 +718,7 @@ impl Manager {
                 if config.instances.iter().any(|i| i.wm_class == draft.wm_class) {
                     draft.wm_class = crate::instance::default_wm_class(&draft.app_id, &draft.slug);
                 }
-                self.create(&draft, allow_override)?.instance
+                self.create(&draft)?.instance
             }
         };
         backup::restore_backup(archive, &instance.resolved_data_dir(&self.paths), progress, cancel)?;

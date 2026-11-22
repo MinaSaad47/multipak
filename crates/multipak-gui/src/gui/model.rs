@@ -156,8 +156,6 @@ pub struct InstanceForm {
     pub badge_letter: String,
     pub autostart: bool,
     pub hide_from_capture: bool,
-    /// The user's consent to add a Flatpak filesystem override.
-    pub allow_override: bool,
     pub saving: bool,
     pub error: Option<String>,
 }
@@ -180,7 +178,6 @@ pub struct FormEval {
     pub errors: HashMap<Field, String>,
     pub warnings: Vec<String>,
     pub preview: Option<Preview>,
-    pub needs_override: Option<String>,
 }
 
 impl FormEval {
@@ -215,7 +212,6 @@ impl InstanceForm {
             badge_letter: "I".to_string(),
             autostart: false,
             hide_from_capture: false,
-            allow_override: false,
             saving: false,
             error: None,
         }
@@ -244,7 +240,6 @@ impl InstanceForm {
             badge_letter: badge.and_then(|b| b.letter).unwrap_or_default(),
             autostart: instance.autostart,
             hide_from_capture: instance.hide_from_capture,
-            allow_override: instance.managed_override.is_some(),
             saving: false,
             error: None,
         }
@@ -365,9 +360,6 @@ impl InstanceForm {
         };
         match draft.validate(DraftContext { paths, existing, editing }) {
             Ok(v) => {
-                let already_ours = matches!(&self.mode, FormMode::Edit(k)
-                    if existing.iter().any(|i| &i.key() == k && i.managed_override.is_some() && i.managed_override == v.needs_override));
-                eval.needs_override = v.needs_override.clone().filter(|_| !already_ours);
                 eval.warnings = v.warnings.clone();
                 let bins = flatpak_bin.cloned().unwrap_or_else(multipak_core::launch::Binaries::standard);
                 eval.preview = Some(manager::preview(paths, &v, &bins, categories));
@@ -383,7 +375,7 @@ impl InstanceForm {
 
     /// Whether the Save/Create button is enabled.
     pub fn can_submit(&self, eval: &FormEval) -> bool {
-        !self.saving && eval.errors.is_empty() && (eval.needs_override.is_none() || self.allow_override)
+        !self.saving && eval.errors.is_empty()
     }
 }
 
@@ -487,25 +479,20 @@ mod tests {
     }
 
     #[test]
-    fn custom_folder_needs_consent() {
+    fn custom_folder_needs_no_extra_permission() {
         let mut f = InstanceForm::create("com.slack.Slack", "Slack", Strategy::Electron, &[]);
         f.custom_dir = true;
         let eval = f.evaluate(&paths(), &[], None, &[]);
         assert!(eval.error(Field::DataDir).is_some());
         f.data_dir = "/home/u/Clients/acme".into();
         let eval = f.evaluate(&paths(), &[], None, &[]);
-        assert_eq!(eval.needs_override.as_deref(), Some("/home/u/Clients/acme"));
         assert!(
             eval.preview
                 .as_ref()
                 .unwrap()
-                .override_command
-                .as_ref()
-                .unwrap()
-                .contains("--filesystem=/home/u/Clients/acme")
+                .command
+                .contains("--bind /home/u/Clients/acme /home/u/.var/app/com.slack.Slack")
         );
-        assert!(!f.can_submit(&eval));
-        f.allow_override = true;
         assert!(f.can_submit(&eval));
     }
 

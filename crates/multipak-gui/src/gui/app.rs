@@ -49,7 +49,7 @@ pub enum Dialog {
     Settings,
     Doctor { issues: Loadable<Vec<Issue>>, working: bool },
     ExportOptions { with_data: bool },
-    Import { path: PathBuf, file: ExportFile, opts: ImportOptions, custom_dirs: Vec<String> },
+    Import { path: PathBuf, file: ExportFile, opts: ImportOptions },
     ConfirmRestore { key: InstanceKey, name: String, path: PathBuf },
     Message { title: String, body: String },
 }
@@ -503,12 +503,11 @@ impl MultipakApp {
             }
             Output::ExportRead(path, r) => match r {
                 Ok(file) => {
-                    let custom_dirs: Vec<String> = file.instances.iter().filter_map(|e| e.data_dir.clone()).collect();
                     let opts = ImportOptions {
                         restore_data: file.instances.iter().any(|e| e.backup.is_some()),
                         ..Default::default()
                     };
-                    self.dialog = Some(Dialog::Import { path, file, opts, custom_dirs });
+                    self.dialog = Some(Dialog::Import { path, file, opts });
                 }
                 Err(e) => self.error("Could not read the export", e),
             },
@@ -672,14 +671,11 @@ impl MultipakApp {
         };
         form.saving = true;
         form.error = None;
-        let allow = form.allow_override;
         let mode = form.mode.clone();
         let mgr = self.mgr.clone();
         self.worker.spawn(move |_| match mode {
-            super::model::FormMode::Create => Output::Saved { editing: false, result: mgr.create(&draft, allow) },
-            super::model::FormMode::Edit(key) => {
-                Output::Saved { editing: true, result: mgr.update(&key, &draft, allow) }
-            }
+            super::model::FormMode::Create => Output::Saved { editing: false, result: mgr.create(&draft) },
+            super::model::FormMode::Edit(key) => Output::Saved { editing: true, result: mgr.update(&key, &draft) },
         });
     }
 
@@ -819,12 +815,7 @@ impl MultipakApp {
                 let slug = instance::unique_slug(&manifest.instance.slug, |s| {
                     config.get(&InstanceKey::new(&app, s)).is_some()
                 });
-                mgr.restore(
-                    &path,
-                    RestoreTarget::New { slug: Some(slug), allow_override: false },
-                    &|p| ctx.progress(p),
-                    &ctx.cancel,
-                )
+                mgr.restore(&path, RestoreTarget::New { slug: Some(slug) }, &|p| ctx.progress(p), &ctx.cancel)
             })();
             Output::Restored(result)
         });

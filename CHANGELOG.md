@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
 ### Changed
 
 - One isolation method for every app: each instance's data folder is mounted over the app's own
@@ -17,6 +19,10 @@ All notable changes to this project are documented here. The format follows
 - Data folders of Electron, Chromium and Firefox instances created by 0.1 are moved into the
   new layout once (Firefox profiles become the instance's default profile), and existing
   launchers are rewritten, when Multipak starts or the instance is launched.
+- Custom data folders no longer need a Flatpak filesystem override: they are mounted into the
+  sandbox. The consent step and the `--grant-access` option of `create`, `restore` and
+  `import` are gone, and overrides added by 0.1 are removed automatically (or with the new
+  "Remove folder access" repair).
 
 ### Added
 
@@ -52,5 +58,6 @@ First release.
   `export`, `import`.
 - AppImage and release tarball.
 
-[Unreleased]: https://github.com/MinaSaad47/multipak/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/MinaSaad47/multipak/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MinaSaad47/multipak/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/MinaSaad47/multipak/releases/tag/v0.1.0

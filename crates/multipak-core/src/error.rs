@@ -58,12 +58,6 @@ pub enum Error {
     #[error("{0} is not installed")]
     AppNotInstalled(String),
 
-    #[error(
-        "{app_id} cannot reach {} from its sandbox. Multipak needs to run `flatpak override --user --filesystem={} {app_id}`; allow this to continue.",
-        .dir.display(), .dir.display()
-    )]
-    OverrideRequired { app_id: String, dir: PathBuf },
-
     #[error("{instance} exited right after starting{}. Output:\n{log}", exit_suffix(*.code))]
     LaunchFailed { instance: String, code: Option<i32>, log: String },
 

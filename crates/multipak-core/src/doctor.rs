@@ -6,7 +6,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::flatpak;
 use crate::instance::InstanceKey;
 use crate::keyfile::KeyFile;
 use crate::manager::{Manager, app_categories, launcher_text};
@@ -23,7 +22,7 @@ pub enum IssueKind {
     AutostartOutdated,
     AutostartStale,
     BadgeIconMissing,
-    OverrideMissing,
+    OldOverride,
     CaptureHelperMissing,
     CaptureHelperLeftover,
     OrphanFile,
@@ -41,8 +40,8 @@ pub enum Fix {
     RemoveInstance(InstanceKey),
     /// Delete a leftover file Multipak created.
     RemoveFile(PathBuf),
-    /// Add the instance's filesystem override again.
-    ReapplyOverride(InstanceKey),
+    /// Remove the folder access Multipak 0.1 granted for a custom data folder.
+    RemoveOldOverride(InstanceKey),
     /// Install, update or remove the KWin script that hides windows from capture.
     SyncCapture,
     /// Remove a leftover Multipak window rule from `kwinrulesrc`.
@@ -56,7 +55,7 @@ impl Fix {
             Self::CreateDataDir(_) => "Create empty data folder",
             Self::RemoveInstance(_) => "Remove instance (keep data)",
             Self::RemoveFile(_) => "Delete file",
-            Self::ReapplyOverride(_) => "Restore folder access",
+            Self::RemoveOldOverride(_) => "Remove folder access",
             Self::RemoveCaptureRule(_) => "Remove window rule",
             Self::SyncCapture => "Update capture helper",
         }
@@ -186,13 +185,11 @@ impl Manager {
                     Some(Fix::WriteLaunchers(key.clone())),
                 ));
             }
-            if let Some(dir) = &inst.managed_override
-                && !flatpak::override_has_filesystem(paths, &inst.app_id, dir)
-            {
+            if let Some(dir) = &inst.managed_override {
                 issues.push(issue(
-                    IssueKind::OverrideMissing,
-                    format!("The sandbox lost access to {dir}."),
-                    Some(Fix::ReapplyOverride(key.clone())),
+                    IssueKind::OldOverride,
+                    format!("An older version gave the app access to {dir}, which it no longer needs."),
+                    Some(Fix::RemoveOldOverride(key.clone())),
                 ));
             }
         }
@@ -337,13 +334,7 @@ impl Manager {
                 }
                 Ok(())
             }
-            Fix::ReapplyOverride(k) => {
-                let inst = get(k)?;
-                match &inst.managed_override {
-                    Some(dir) => self.flatpak().add_filesystem_override(&inst.app_id, dir),
-                    None => Ok(()),
-                }
-            }
+            Fix::RemoveOldOverride(k) => self.remove_old_override(k),
         }
     }
 }

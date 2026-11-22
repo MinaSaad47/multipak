@@ -88,9 +88,6 @@ pub enum Command {
         /// Create a new instance with this short name.
         #[arg(long = "as", value_name = "SHORT_NAME")]
         as_slug: Option<String>,
-        /// Allow `flatpak override` if the backup uses a custom data folder.
-        #[arg(long)]
-        grant_access: bool,
     },
     /// Hide windows from screenshots, recordings and screen sharing (KDE Plasma).
     Capture {
@@ -129,9 +126,6 @@ pub enum Command {
         /// Import instances whose short name already exists under a new short name instead of skipping them.
         #[arg(long)]
         rename: bool,
-        /// Allow `flatpak override` for instances with custom data folders.
-        #[arg(long)]
-        grant_access: bool,
         /// Do not restore included data backups.
         #[arg(long)]
         no_data: bool,
@@ -156,9 +150,6 @@ pub struct CreateArgs {
     /// Custom data folder (default: ~/.var/app/<app-id>/instances/<short-name>).
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
-    /// Allow `flatpak override` when the data folder is outside the app's sandbox.
-    #[arg(long)]
-    pub grant_access: bool,
     /// Extra argument for the app (repeat for several; use --arg=--flag for flags).
     #[arg(long = "arg", value_name = "ARG", allow_hyphen_values = true)]
     pub args: Vec<String>,
@@ -222,17 +213,17 @@ pub fn run(command: Command, mgr: &Manager) -> anyhow::Result<ExitCode> {
             println!("Backed up {key} ({}) to {}", human_bytes(m.total_bytes), out.display());
             Ok(ExitCode::SUCCESS)
         }
-        Command::Restore { file, into, as_slug, grant_access } => {
+        Command::Restore { file, into, as_slug } => {
             let manifest = backup::read_manifest(&file)?;
             let target = match (into, as_slug) {
                 (Some(q), _) => RestoreTarget::Existing(resolve(mgr, &q)?),
-                (None, Some(slug)) => RestoreTarget::New { slug: Some(slug), allow_override: grant_access },
+                (None, Some(slug)) => RestoreTarget::New { slug: Some(slug) },
                 (None, None) => {
                     let key = manifest.instance.key();
                     if mgr.load()?.get(&key).is_some() {
                         RestoreTarget::Existing(key)
                     } else {
-                        RestoreTarget::New { slug: None, allow_override: grant_access }
+                        RestoreTarget::New { slug: None }
                     }
                 }
             };
@@ -263,10 +254,9 @@ pub fn run(command: Command, mgr: &Manager) -> anyhow::Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Command::Import { file, rename, grant_access, no_data } => {
+        Command::Import { file, rename, no_data } => {
             let opts = ImportOptions {
                 on_conflict: if rename { OnConflict::Rename } else { OnConflict::Skip },
-                allow_overrides: grant_access,
                 restore_data: !no_data,
             };
             let cancel = cancel_on_ctrl_c();
@@ -405,10 +395,7 @@ fn create(mgr: &Manager, a: CreateArgs) -> anyhow::Result<ExitCode> {
     if let Some(w) = details.detection.single_instance.warning() {
         eprintln!("warning: {w}");
     }
-    let outcome = match mgr.create(&draft, a.grant_access) {
-        Err(e @ Error::OverrideRequired { .. }) => bail!("{e}\nRe-run with --grant-access to allow it."),
-        other => other?,
-    };
+    let outcome = mgr.create(&draft)?;
     for w in &outcome.warnings {
         eprintln!("warning: {w}");
     }
@@ -417,9 +404,6 @@ fn create(mgr: &Manager, a: CreateArgs) -> anyhow::Result<ExitCode> {
     println!("  type:        {}", i.strategy.label());
     println!("  data folder: {}", i.resolved_data_dir(mgr.paths()).display());
     println!("  launcher:    {}", mgr.paths().desktop_file(&i.app_id, &i.slug).display());
-    if let Some(o) = &i.managed_override {
-        println!("  access:      flatpak override --user --filesystem={o} {}", i.app_id);
-    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -469,7 +453,7 @@ fn capture(mgr: &Manager, hide: bool, instance: Option<&str>, self_window: bool)
         let inst = config.get(&key).context("instance disappeared")?;
         let mut draft = inst.to_draft();
         draft.hide_from_capture = hide;
-        (inst.display_name(), mgr.update(&key, &draft, false)?.warnings)
+        (inst.display_name(), mgr.update(&key, &draft)?.warnings)
     };
     for w in &warnings {
         eprintln!("warning: {w}");

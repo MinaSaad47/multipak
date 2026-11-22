@@ -92,9 +92,9 @@ Both are installed only while at least one instance hides from capture, and remo
 afterwards. Multipak's own window uses a plain KWin window rule. Other desktops have no
 equivalent feature, so there the option is saved but has no effect.
 
-If you choose a data folder **outside** `~/.var/app/<app-id>/`, Multipak shows you the exact
-`flatpak override --user --filesystem=<dir> <app-id>` command, asks first, and removes exactly
-that permission again when you delete the instance.
+A data folder can live anywhere, for example `~/Clients/acme/slack`. Because it is mounted
+over the app folder, the app needs no extra permission to reach it, and Multipak never changes
+the app's Flatpak permissions.
 
 ## Requirements
 
@@ -208,11 +208,11 @@ multipak [--verbose] [--log-file] [COMMAND]
 | `multipak stop INSTANCE` | Stop every running sandbox of an instance |
 | `multipak delete INSTANCE [--delete-data [--confirm SHORT_NAME]]` | Delete an instance; data is kept unless `--delete-data` (asks you to type the short name, or pass `--confirm`) |
 | `multipak backup INSTANCE [-o FILE]` | Back up the data folder to a `.tar.zst` file |
-| `multipak restore FILE [--into INSTANCE \| --as SHORT_NAME] [--grant-access]` | Restore a backup into its instance (recreated if missing), another instance, or a new one |
+| `multipak restore FILE [--into INSTANCE \| --as SHORT_NAME]` | Restore a backup into its instance (recreated if missing), another instance, or a new one |
 | `multipak capture on\|off (INSTANCE \| --self)` | Hide an instance, or Multipak's own window, from screenshots, recordings and screen sharing (KDE Plasma) |
 | `multipak doctor [--fix [--remove-missing]]` | Check the setup; `--fix` applies the fixes (exit code 2 if problems remain) |
 | `multipak export FILE [--with-data]` | Export the setup as JSON, optionally with data backups |
-| `multipak import FILE [--rename] [--grant-access] [--no-data]` | Import an exported setup |
+| `multipak import FILE [--rename] [--no-data]` | Import an exported setup |
 
 `create` options:
 
@@ -222,7 +222,6 @@ multipak [--verbose] [--log-file] [COMMAND]
 | `--class WM_CLASS` | Window class (default: `multipak-<app>-<short-name>`) |
 | `--strategy electron\|chromium\|firefox\|generic` | Launch type (default: detected) |
 | `--data-dir DIR` | Custom data folder |
-| `--grant-access` | Allow the `flatpak override` a custom folder needs |
 | `--arg ARG` | Extra app argument; repeat for several, use `--arg=--flag` for flags |
 | `--env KEY=VALUE` | Environment variable; repeatable |
 | `--badge-color '#RRGGBB'` / `--badge-letter X` | Colored badge on the launcher icon |
@@ -233,7 +232,7 @@ Examples:
 
 ```sh
 multipak create com.slack.Slack Work --badge-color '#e01b24' --badge-letter W
-multipak create com.google.Chrome "Client ACME" --data-dir ~/Clients/acme/chrome --grant-access
+multipak create com.google.Chrome "Client ACME" --data-dir ~/Clients/acme/chrome
 multipak launch work
 multipak backup com.slack.Slack/work -o ~/Backups/slack-work.tar.zst
 multipak doctor --fix
@@ -276,7 +275,6 @@ to add an app to the built-in table.
 | `~/.local/share/kwin/scripts/multipak-capture/`, `~/.local/share/dbus-1/services/io.github.minasaad47.Multipak.service` | Only on KDE Plasma, while an instance hides from screen capture (enabled in `~/.config/kwinrc`) |
 | `~/.config/kwinrulesrc` | Only if Multipak's own window hides from capture: the `multipak-self` rule |
 | `~/.local/state/multipak/` | Launch output of each instance, and the log file (if enabled) |
-| `~/.local/share/flatpak/overrides/<app-id>` | Only for custom data folders, after you allowed it |
 
 Window size, theme and the last selected app are stored separately by eframe in
 `~/.local/share/multipak/`.
@@ -330,7 +328,6 @@ as `instances.toml.v<N>.bak`). Files from newer versions are refused rather than
   If you move the Multipak AppImage, run **Repair** so the helper points to the new location.
 - **Running detection** reads `/proc` of the sandbox processes. On systems mounted with
   `hidepid`, instances may show as "Not running" even when they are.
-- **Folder access** is granted with per-user overrides (`flatpak override --user`) only.
 
 ## FAQ
 
@@ -339,7 +336,8 @@ No. New instances start empty in their own folder. The app's normal copy keeps u
 `~/.var/app/<app-id>/` as before.
 
 **Does Multipak need root?**
-No. Everything happens in your home folder.
+No. Everything happens in your home folder, and the mount namespace bubblewrap creates is
+unprivileged.
 
 **Do launchers keep working if I uninstall Multipak?**
 Yes, they call `flatpak` directly. To remove them, delete the instances first, or remove
@@ -375,9 +373,9 @@ AccessKit (screen reader support) stays enabled.
 
 ## Why Multipak is not a Flatpak
 
-Multipak has to run the host's `flatpak` and `bwrap` commands (`flatpak run`, `ps`, `kill`, `override`),
+Multipak has to run the host's `flatpak` and `bwrap` commands (`flatpak run`, `ps`, `kill`),
 read `/proc` of sandboxed processes, and write launchers into `~/.local/share/applications`,
-`~/.config/autostart` and the Flatpak overrides folder. Inside a Flatpak sandbox, all of that
+`~/.config/autostart` and `~/.var/app`. Inside a Flatpak sandbox, all of that
 would need `flatpak-spawn --host` plus broad filesystem access, which would defeat the
 sandbox, and Flathub would rightly reject it. Multipak is therefore shipped as an AppImage, an
 plain binary, or built from source.
