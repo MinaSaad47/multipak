@@ -42,7 +42,7 @@ body:
     id: install
     attributes:
       label: How did you install Multipak?
-      description: AppImage, AUR, built from source, …
+      description: AppImage, release tarball, built from source, …
   - type: textarea
     id: logs
     attributes:

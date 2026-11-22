@@ -36,7 +36,7 @@ multipak/
 │               ├── app.rs    state and actions
 │               ├── views.rs  panels and instance cards
 │               └── dialogs.rs modal dialogs
-├── packaging/                .desktop file, icon, AppStream metadata, AppImage script, PKGBUILD
+├── packaging/                .desktop file, icon, AppStream metadata, AppImage script
 └── .github/                  CI, release workflow, issue and PR templates
 ```
 
@@ -121,10 +121,9 @@ Users can make the same additions locally, without rebuilding, in
 Add user-facing changes to `CHANGELOG.md` under **Unreleased**. To release:
 
 1. Move the Unreleased entries under a new version heading and update the version in the
-   workspace `Cargo.toml`, `packaging/aur/PKGBUILD` and the AppStream metadata.
+   workspace `Cargo.toml` and the AppStream metadata.
 2. Commit, tag `vX.Y.Z` and push the tag. The release workflow builds the x86_64 tarball and
    AppImage and attaches them to a GitHub release.
-3. Update the AUR package from `packaging/aur/PKGBUILD`.
 
 ## Code of conduct
 
@@ -132,5 +131,5 @@ Be kind and constructive. Assume good intent, and keep discussions focused on th
 
 ## License
 
-By contributing, you agree that your contributions are dual-licensed under the MIT and
-Apache-2.0 licenses, as described in the README.
+By contributing, you agree that your contributions are licensed under the MIT license
+(see [LICENSE](LICENSE)).

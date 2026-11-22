@@ -29,7 +29,7 @@ First release.
   and AccessKit support.
 - CLI: `list`, `apps`, `create`, `launch`, `stop`, `delete`, `backup`, `restore`, `doctor`,
   `export`, `import`.
-- AppImage, release tarball and AUR PKGBUILD.
+- AppImage and release tarball.
 
 [Unreleased]: https://github.com/MinaSaad47/multipak/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/MinaSaad47/multipak/releases/tag/v0.1.0

@@ -607,7 +607,7 @@ impl MultipakApp {
             ));
             ui.add_space(8.0);
             ui.label(RichText::new("About").strong());
-            ui.label(format!("Multipak {} · MIT OR Apache-2.0", env!("CARGO_PKG_VERSION")));
+            ui.label(format!("Multipak {} · MIT license", env!("CARGO_PKG_VERSION")));
             ui.label("Privacy: Multipak makes no network connections and collects no data.");
             ui.hyperlink_to("Source code and documentation", env!("CARGO_PKG_REPOSITORY"));
             let mut out = Outcome::Keep;

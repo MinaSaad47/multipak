@@ -92,14 +92,6 @@ Instance launchers call `/usr/bin/flatpak` directly, not the AppImage, so moving
 the AppImage never breaks them. The release page also has a plain `x86_64` tarball with the
 binary, the `.desktop` file and the icon.
 
-### Arch Linux (AUR)
-
-```sh
-yay -S multipak        # or: paru -S multipak
-```
-
-The PKGBUILD lives in [`packaging/aur/PKGBUILD`](packaging/aur/PKGBUILD).
-
 ### Build from source
 
 Install Rust with [rustup](https://rustup.rs). The repository pins the toolchain in
@@ -354,7 +346,7 @@ read `/proc` of sandboxed processes, and write launchers into `~/.local/share/ap
 `~/.config/autostart` and the Flatpak overrides folder. Inside a Flatpak sandbox, all of that
 would need `flatpak-spawn --host` plus broad filesystem access, which would defeat the
 sandbox, and Flathub would rightly reject it. Multipak is therefore shipped as an AppImage, an
-AUR package, a plain binary, or built from source.
+plain binary, or built from source.
 
 ## Contributing
 
@@ -363,11 +355,4 @@ how to run the checks, and how to add an app to the app-type table.
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
-
-at your option. Unless you explicitly state otherwise, any contribution intentionally
-submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual
-licensed as above, without any additional terms or conditions.
+Multipak is licensed under the [MIT license](LICENSE).

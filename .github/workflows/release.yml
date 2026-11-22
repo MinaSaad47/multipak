@@ -48,7 +48,7 @@ jobs:
           name="multipak-${VERSION}-x86_64-linux"
           mkdir -p "dist/$name"
           cp target/release/multipak "dist/$name/"
-          cp packaging/multipak.desktop packaging/multipak.svg README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp packaging/multipak.desktop packaging/multipak.svg README.md CHANGELOG.md LICENSE "dist/$name/"
           cp crates/multipak-gui/assets/multipak-256.png "dist/$name/multipak.png"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
 

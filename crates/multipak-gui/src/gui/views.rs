@@ -325,7 +325,7 @@ impl MultipakApp {
         let running = self.running_keys();
         let spacing = ui.spacing().item_spacing.x;
         let available = ui.available_width();
-        let columns = ((available + spacing) / (CARD_WIDTH + spacing)).floor().max(1.0) as usize;
+        let columns = (((available + spacing) / (CARD_WIDTH + spacing)).floor().max(1.0) as usize).min(instances.len());
         // Cards stretch so each row fills the full width.
         let card_width = ((available - spacing * (columns as f32 - 1.0)) / columns as f32).floor();
         let mut actions: Vec<(InstanceKey, CardAction)> = Vec::new();
